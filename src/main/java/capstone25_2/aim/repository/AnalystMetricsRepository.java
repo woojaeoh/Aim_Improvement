@@ -7,5 +7,5 @@ import java.util.Optional;
 
 @Repository
 public interface AnalystMetricsRepository {
-    Optional<AnalystMetrics> findByAnalystsId(Long analystsId);
+    Optional<AnalystMetrics> findByAnalystId(Long analystId);
 }
