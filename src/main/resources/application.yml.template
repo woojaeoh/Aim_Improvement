@@ -1,0 +1,27 @@
+server:
+  port: 8080
+
+spring:
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://localhost:3306/aim?serverTimezone=Asia/Seoul&characterEncoding=UTF-8
+    username: user_name
+    password: user_password
+
+  jpa:
+    hibernate:
+      ddl-auto: update     # ??????? update, ??????? validate ??
+    properties:
+      hibernate:
+        format_sql: true
+        dialect: org.hibernate.dialect.MySQL8Dialect
+        show_sql: true
+    open-in-view: false
+
+  jackson:
+    property-naming-strategy: SNAKE_CASE
+
+logging:
+  level:
+    org.hibernate.SQL: debug
+    org.hibernate.type.descriptor.sql.BasicBinder: trace
