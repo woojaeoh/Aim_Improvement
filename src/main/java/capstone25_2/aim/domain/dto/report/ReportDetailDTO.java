@@ -1,6 +1,5 @@
 package capstone25_2.aim.domain.dto.report;
 
-import capstone25_2.aim.domain.entity.Analysis;
 import capstone25_2.aim.domain.entity.Report;
 import lombok.*;
 
@@ -17,28 +16,24 @@ public class ReportDetailDTO {
     private LocalDate reportDate;
     private String surfaceOpinion;
     private Integer targetPrice;
-    private Integer prevTargetDiff;
+    private String hiddenOpinion;
+    private Long prevReportId;
 
     private String analystName;
     private String firmName;
 
-  //  private AnalysisSummaryDTO analysis; // 포함
-
-    public static ReportDetailDTO of(Report report, Analysis analysis) {
+    public static ReportDetailDTO fromEntity(Report report) {
         return ReportDetailDTO.builder()
                 .reportId(report.getId())
                 .reportTitle(report.getReportTitle())
                 .reportDate(LocalDate.from(report.getReportDate()))
                 .surfaceOpinion(report.getSurfaceOpinion().name())
                 .targetPrice(report.getTargetPrice())
-                .prevTargetDiff(report.getPrevTargetDiff())
+                .hiddenOpinion(report.getHiddenOpinion())
+                .prevReportId(report.getPrevReport() != null ? report.getPrevReport().getId() : null)
                 .analystName(report.getAnalyst().getAnalystName())
                 .firmName(report.getAnalyst().getFirmName())
-      //          .analysis(AnalysisSummaryDTO.fromEntity(analysis))
                 .build();
     }
-
-
-
 
 }

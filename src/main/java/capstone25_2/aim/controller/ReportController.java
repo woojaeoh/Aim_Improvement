@@ -2,9 +2,7 @@ package capstone25_2.aim.controller;
 
 import capstone25_2.aim.domain.dto.report.ReportDetailDTO;
 import capstone25_2.aim.domain.dto.report.ReportResponseDTO;
-import capstone25_2.aim.domain.entity.Analysis;
 import capstone25_2.aim.domain.entity.Report;
-import capstone25_2.aim.service.AnalysisService;
 import capstone25_2.aim.service.ReportService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -20,7 +18,6 @@ import java.util.List;
 public class ReportController {
 
     private final ReportService reportService;
-    private final AnalysisService analysisService;
 
     // 특정 애널리스트의 리포트 리스트 조회
     @GetMapping("/analyst/{analystId}")
@@ -38,13 +35,11 @@ public class ReportController {
                 .toList();
     }
 
-    // 리포트 상세 조회 + 분석결과 포함
+    // 리포트 상세 조회
     @GetMapping("/{reportId}")
     public ReportDetailDTO getReportDetail(@PathVariable Long reportId) {
         Report report = reportService.getReportById(reportId)
                 .orElseThrow(() -> new RuntimeException("Report not found"));
-        Analysis analysis = analysisService.getAnalysisByReportId(reportId)
-                .orElse(null);
-        return ReportDetailDTO.of(report, analysis);
+        return ReportDetailDTO.fromEntity(report);
     }
 }

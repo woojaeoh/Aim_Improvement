@@ -24,7 +24,13 @@ public class Report {
     private SurfaceOpinion surfaceOpinion; //BUY, HOLD, SELL
 
     private Integer targetPrice;
-    private Integer prevTargetDiff;
+
+    @Column(columnDefinition = "TEXT")
+    private String hiddenOpinion;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "prev_report_id")
+    private Report prevReport;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "stock_id")
@@ -33,8 +39,5 @@ public class Report {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "analyst_id")
     private Analyst analyst;
-
-    @OneToOne(mappedBy = "report", cascade = CascadeType.ALL,orphanRemoval = true, fetch = FetchType.LAZY)
-    private Analysis analysis;
 
 }

@@ -17,7 +17,8 @@ public class ReportResponseDTO {
     private LocalDate reportDate;
     private String surfaceOpinion;
     private Integer targetPrice;
-    private Integer prevTargetDiff;
+    private String hiddenOpinion;
+    private Long prevReportId;
 
 
     public static ReportResponseDTO fromEntity(Report report) {
@@ -29,7 +30,8 @@ public class ReportResponseDTO {
                 .reportDate(LocalDate.from(report.getReportDate()))
                 .surfaceOpinion(report.getSurfaceOpinion().name())
                 .targetPrice(report.getTargetPrice())
-                .prevTargetDiff(report.getPrevTargetDiff())
+                .hiddenOpinion(report.getHiddenOpinion())
+                .prevReportId(report.getPrevReport() != null ? report.getPrevReport().getId() : null)
                 .build();
     }
 }
