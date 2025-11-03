@@ -27,18 +27,18 @@ public class AnalystMetricsService {
 
     // 🔹 특정 종목 기준 랭킹
     public AnalystRankingResponseDTO getRankedAnalystsByStock(Long stockId, String sortBy) {
-        // 1️⃣ 해당 종목의 리포트를 전부 가져옴
+        // 1. 해당 종목의 리포트를 전부 가져옴
         List<Long> analystIds = reportRepository.findByStockId(stockId).stream()
                 .map(r -> r.getAnalyst().getId())
                 .distinct()
                 .toList();
 
-        // 2️⃣ 애널리스트 ID 기반으로 메트릭 필터링
+        // 2. 애널리스트 ID 기반으로 메트릭 필터링
         List<AnalystMetrics> metricsList = metricsRepository.findAll().stream()
                 .filter(m -> analystIds.contains(m.getAnalyst().getId()))
                 .toList();
 
-        // 3️⃣ 정렬 결과 반환
+        // 3. 정렬 결과 반환
         return createRankedResponse(metricsList, sortBy);
     }
 
