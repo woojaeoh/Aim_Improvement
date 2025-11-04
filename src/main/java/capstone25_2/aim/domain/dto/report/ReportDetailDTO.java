@@ -1,6 +1,6 @@
 package capstone25_2.aim.domain.dto.report;
 
-import capstone25_2.aim.domain.entity.HiddenOpinion;
+import capstone25_2.aim.domain.entity.SurfaceOpinion;
 import capstone25_2.aim.domain.entity.Report;
 import lombok.*;
 
@@ -15,9 +15,9 @@ public class ReportDetailDTO {
     private Long reportId;
     private String reportTitle;
     private LocalDate reportDate;
-    private Double surfaceOpinion;
+    private SurfaceOpinion surfaceOpinion;
     private Integer targetPrice;
-    private HiddenOpinion hiddenOpinion;
+    private Double hiddenOpinion;
     private Long prevReportId;
 
     private String analystName;

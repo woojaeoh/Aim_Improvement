@@ -20,12 +20,12 @@ public class Report {
 
     private LocalDateTime reportDate;
 
-    private Double surfaceOpinion; //0.0 ~ 1.0 사이의 확률 값
+    @Enumerated(EnumType.STRING)
+    private SurfaceOpinion surfaceOpinion; //BUY, HOLD, SELL
 
     private Integer targetPrice;
 
-    @Enumerated(EnumType.STRING) //이거 무조건 ordinal 아니고 string으로 써야함. -> enum 변경되었을떄 반영 가능.
-    private HiddenOpinion hiddenOpinion; //BUY, SELL
+    private Double hiddenOpinion; //0.0 ~ 1.0 사이의 확률 값
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "prev_report_id")
