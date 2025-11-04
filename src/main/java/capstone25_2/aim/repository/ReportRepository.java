@@ -1,7 +1,6 @@
 package capstone25_2.aim.repository;
 
 import capstone25_2.aim.domain.entity.Report;
-import capstone25_2.aim.domain.entity.SurfaceOpinion;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 
@@ -15,7 +14,6 @@ public interface ReportRepository extends JpaRepository<Report, Long> {
 
     List<Report> findByStockId(Long stockId); // 여러 주식 종목들 리스트
     List<Report> findByAnalystId(Long analystId); //여러 애널리스트 리스트
-    List<Report> findBySurfaceOpinion(SurfaceOpinion opinion); //종목에 해당하는 표면적 의견 리스트
 
     // 최신 5년 리포트 조회
     List<Report> findByStockIdAndReportDateAfterOrderByReportDateDesc(Long stockId, LocalDateTime fromDate);

@@ -20,8 +20,7 @@ public class Report {
 
     private LocalDateTime reportDate;
 
-    @Enumerated(EnumType.STRING) //이거 무조건 ordinal 아니고 string으로 써야함. -> enum 변경되었을떄 반영 가능.
-    private SurfaceOpinion surfaceOpinion; //BUY, HOLD, SELL
+    private Double surfaceOpinion; //0.0 ~ 1.0 사이의 확률 값
 
     private Integer targetPrice;
 
