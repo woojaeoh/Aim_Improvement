@@ -255,8 +255,14 @@ public class ReportService {
         report.setAnalyst(analyst);
         report.setStock(stock);  // JPA가 자동으로 stock_id FK 저장
 
-        // prevReport는 나중에 별도로 설정하는 로직이 필요할 수 있음
-        // 현재는 null로 설정
+        // 5. prevReport 설정: 같은 애널리스트 + 같은 종목의 직전 리포트 조회
+        Optional<Report> prevReport = reportRepository
+                .findTopByAnalystIdAndStockIdAndReportDateBeforeOrderByReportDateDesc(
+                        analyst.getId(),
+                        stock.getId(),
+                        reportDate
+                );
+        prevReport.ifPresent(report::setPrevReport);
 
         return reportRepository.save(report);
     }
