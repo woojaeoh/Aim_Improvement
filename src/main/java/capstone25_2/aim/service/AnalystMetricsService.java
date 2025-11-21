@@ -669,7 +669,7 @@ public class AnalystMetricsService {
     /**
      * 전체 애널리스트의 평균 수익률과 목표가 오차율 계산
      * 모든 리포트 평가 (의견 변화시 변화 시점 종가, 없으면 1년 후 종가 비교)
-     *
+     *---
      * @return 전체 애널리스트들의 평균 메트릭
      */
     private GlobalAverageMetrics calculateGlobalAverageMetrics() {
