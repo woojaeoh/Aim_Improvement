@@ -160,25 +160,32 @@ public class AnalystMetricsService {
         int correctCount = (int) allEvaluations.stream().filter(r -> r.isCorrect).count();
         double accuracyRate = (double) correctCount / allEvaluations.size() * 100.0;
 
-        double averageReturn = allEvaluations.stream()
+        Double averageReturn = allEvaluations.stream()
                 .mapToDouble(r -> r.returnRate)
                 .average()
-                .orElse(0.0);
+                .isPresent() ? allEvaluations.stream()
+                .mapToDouble(r -> r.returnRate)
+                .average()
+                .getAsDouble() : null;
 
-        double averageTargetDiff = allEvaluations.stream()
+        Double averageTargetDiff = allEvaluations.stream()
                 .filter(r -> r.targetDiffRate != null)
                 .mapToDouble(r -> r.targetDiffRate)
                 .average()
-                .orElse(0.0);
+                .isPresent() ? allEvaluations.stream()
+                .filter(r -> r.targetDiffRate != null)
+                .mapToDouble(r -> r.targetDiffRate)
+                .average()
+                .getAsDouble() : null;
 
         // 상대적 성과 계산 (전체 애널리스트 평균과 비교)
         GlobalAverageMetrics globalAvg = calculateGlobalAverageMetrics();
 
-        Double avgReturnDiff = (globalAvg.averageReturn != null)
+        Double avgReturnDiff = (globalAvg.averageReturn != null && averageReturn != null)
             ? averageReturn - globalAvg.averageReturn
             : null;
 
-        Double avgTargetDiff = (globalAvg.averageTargetDiff != null)
+        Double avgTargetDiff = (globalAvg.averageTargetDiff != null && averageTargetDiff != null)
             ? averageTargetDiff - globalAvg.averageTargetDiff
             : null;
 
@@ -188,8 +195,8 @@ public class AnalystMetricsService {
                 .orElseGet(AnalystMetrics::new);
 
         metrics.setAccuracyRate(roundToTwoDecimals(accuracyRate));
-        metrics.setReturnRate(roundToTwoDecimals(averageReturn));
-        metrics.setTargetDiffRate(roundToTwoDecimals(averageTargetDiff));
+        metrics.setReturnRate(averageReturn != null ? roundToTwoDecimals(averageReturn) : null);
+        metrics.setTargetDiffRate(averageTargetDiff != null ? roundToTwoDecimals(averageTargetDiff) : null);
         metrics.setAvgReturnDiff(avgReturnDiff != null ? roundToTwoDecimals(avgReturnDiff) : null);
         metrics.setAvgTargetDiff(avgTargetDiff != null ? roundToTwoDecimals(avgTargetDiff) : null);
         metrics.setAnalyst(analystRepository.findById(analystId).orElseThrow());
@@ -287,16 +294,23 @@ public class AnalystMetricsService {
         int correctCount = (int) allEvaluations.stream().filter(r -> r.isCorrect).count();
         double accuracyRate = (double) correctCount / allEvaluations.size() * 100.0;
 
-        double averageReturn = allEvaluations.stream()
+        Double averageReturn = allEvaluations.stream()
                 .mapToDouble(r -> r.returnRate)
                 .average()
-                .orElse(0.0);
+                .isPresent() ? allEvaluations.stream()
+                .mapToDouble(r -> r.returnRate)
+                .average()
+                .getAsDouble() : null;
 
-        double averageTargetDiff = allEvaluations.stream()
+        Double averageTargetDiff = allEvaluations.stream()
                 .filter(r -> r.targetDiffRate != null)
                 .mapToDouble(r -> r.targetDiffRate)
                 .average()
-                .orElse(0.0);
+                .isPresent() ? allEvaluations.stream()
+                .filter(r -> r.targetDiffRate != null)
+                .mapToDouble(r -> r.targetDiffRate)
+                .average()
+                .getAsDouble() : null;
 
         // 5. 전체 애널리스트 평균 대비 차이 계산
         Double avgReturnDiff = null;
@@ -304,12 +318,12 @@ public class AnalystMetricsService {
 
         if (globalAverage != null) {
             // 수익률 차이: 이 애널리스트의 평균 수익률 - 전체 평균 수익률
-            if (globalAverage.averageReturn != null) {
+            if (globalAverage.averageReturn != null && averageReturn != null) {
                 avgReturnDiff = averageReturn - globalAverage.averageReturn;
             }
 
             // 목표가 오차율 차이: 이 애널리스트의 평균 목표가 오차율 - 전체 평균 목표가 오차율
-            if (globalAverage.averageTargetDiff != null) {
+            if (globalAverage.averageTargetDiff != null && averageTargetDiff != null) {
                 avgTargetDiff = averageTargetDiff - globalAverage.averageTargetDiff;
             }
         }
@@ -320,8 +334,8 @@ public class AnalystMetricsService {
                 .orElseGet(AnalystMetrics::new);
 
         metrics.setAccuracyRate(roundToTwoDecimals(accuracyRate));
-        metrics.setReturnRate(roundToTwoDecimals(averageReturn));
-        metrics.setTargetDiffRate(roundToTwoDecimals(averageTargetDiff));
+        metrics.setReturnRate(averageReturn != null ? roundToTwoDecimals(averageReturn) : null);
+        metrics.setTargetDiffRate(averageTargetDiff != null ? roundToTwoDecimals(averageTargetDiff) : null);
         metrics.setAvgReturnDiff(avgReturnDiff != null ? roundToTwoDecimals(avgReturnDiff) : null);
         metrics.setAvgTargetDiff(avgTargetDiff != null ? roundToTwoDecimals(avgTargetDiff) : null);
         metrics.setAnalyst(analystRepository.findById(analystId).orElseThrow());
@@ -905,16 +919,23 @@ public class AnalystMetricsService {
         }
 
         // 평균 계산
-        double averageReturn = allEvaluations.stream()
+        Double averageReturn = allEvaluations.stream()
                 .mapToDouble(r -> r.returnRate)
                 .average()
-                .orElse(0.0);
+                .isPresent() ? allEvaluations.stream()
+                .mapToDouble(r -> r.returnRate)
+                .average()
+                .getAsDouble() : null;
 
-        double averageTargetDiff = allEvaluations.stream()
+        Double averageTargetDiff = allEvaluations.stream()
                 .filter(r -> r.targetDiffRate != null)
                 .mapToDouble(r -> r.targetDiffRate)
                 .average()
-                .orElse(0.0);
+                .isPresent() ? allEvaluations.stream()
+                .filter(r -> r.targetDiffRate != null)
+                .mapToDouble(r -> r.targetDiffRate)
+                .average()
+                .getAsDouble() : null;
 
         return new GlobalAverageMetrics(averageReturn, averageTargetDiff);
     }
