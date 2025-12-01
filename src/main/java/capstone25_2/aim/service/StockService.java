@@ -6,6 +6,7 @@ import capstone25_2.aim.domain.entity.ClosePrice;
 import capstone25_2.aim.domain.entity.HiddenOpinionLabel;
 import capstone25_2.aim.domain.entity.Report;
 import capstone25_2.aim.domain.entity.Stock;
+import capstone25_2.aim.domain.entity.SurfaceOpinion;
 import capstone25_2.aim.repository.AnalystMetricsRepository;
 import capstone25_2.aim.repository.ClosePriceRepository;
 import capstone25_2.aim.repository.ReportRepository;
@@ -34,44 +35,124 @@ public class StockService {
     }
 
     // 종목 리스트 조회 (상승여력, 매수 비율 포함)
+    // 쿼리 최적화: N+1 문제 해결 (전체 3개 쿼리로 처리)
     @Transactional(readOnly = true)
     public List<StockListDTO> getAllStocksWithRankingInfo() {
+        // 1. 모든 종목 조회 (쿼리 1개)
         List<Stock> stocks = stockRepository.findAll();
 
+        if (stocks.isEmpty()) {
+            return List.of();
+        }
+
+        // 2. 모든 종목의 ID 수집
+        List<Long> stockIds = stocks.stream()
+                .map(Stock::getId)
+                .collect(Collectors.toList());
+
+        // 3. 모든 리포트를 한 번에 조회 (쿼리 1개) - 날짜 제한 없음
+        List<Report> allReports = reportRepository.findAll().stream()
+                .filter(report -> stockIds.contains(report.getStock().getId()))
+                .sorted(Comparator.comparing(Report::getReportDate).reversed())
+                .collect(Collectors.toList());
+
+        // 4. 모든 종목의 최신 종가를 한 번에 조회 (쿼리 1개)
+        List<ClosePrice> allClosePrices = closePriceRepository
+                .findByStockIdInOrderByStockIdAscTradeDateDesc(stockIds);
+
+        // 5. 리포트를 종목별로 그룹핑 (메모리 연산)
+        Map<Long, List<Report>> reportsByStock = allReports.stream()
+                .collect(Collectors.groupingBy(report -> report.getStock().getId()));
+
+        // 6. 종가를 종목별로 그룹핑하여 최신 종가만 저장 (메모리 연산)
+        Map<Long, Integer> latestClosePriceByStock = new HashMap<>();
+        for (ClosePrice closePrice : allClosePrices) {
+            Long stockId = closePrice.getStock().getId();
+            if (!latestClosePriceByStock.containsKey(stockId)) {
+                latestClosePriceByStock.put(stockId, closePrice.getClosePrice());
+            }
+        }
+
+        // 7. 각 종목의 상승여력과 매수비율 계산 (메모리 연산)
         return stocks.stream()
                 .map(stock -> {
-                    StockConsensusDTO consensus = null;
-                    Double upsidePotential = null;
-                    Double buyRatio = null;
+                    List<Report> stockReports = reportsByStock.get(stock.getId());
+                    Integer latestClosePrice = latestClosePriceByStock.get(stock.getId());
 
-                    try {
-                        // 각 종목의 consensus 정보 조회
-                        consensus = reportService.getStockConsensus(stock.getId());
-
-                        // 상승여력 (소수점 한자리)
-                        if (consensus.getUpsidePotential() != null) {
-                            upsidePotential = Math.round(consensus.getUpsidePotential() * 10.0) / 10.0;
-                        }
-
-                        // 매수 비율 계산 (BUY / 전체 * 100, 소수점 한자리)
-                        int totalOpinions = consensus.getBuyCount() + consensus.getHoldCount() + consensus.getSellCount();
-                        if (totalOpinions > 0) {
-                            buyRatio = Math.round((double) consensus.getBuyCount() / totalOpinions * 1000.0) / 10.0;
-                        }
-                    } catch (RuntimeException e) {
-                        // 리포트가 없는 종목은 null 값으로 유지
-                    }
-
-                    return StockListDTO.builder()
-                            .id(stock.getId())
-                            .stockName(stock.getStockName())
-                            .stockCode(stock.getStockCode())
-                            .sector(stock.getSector())
-                            .upsidePotential(upsidePotential)
-                            .buyRatio(buyRatio)
-                            .build();
+                    return calculateStockRankingInfo(stock, stockReports, latestClosePrice);
                 })
                 .collect(Collectors.toList());
+    }
+
+    /**
+     * 종목의 랭킹 정보 계산 (상승여력, 매수비율)
+     */
+    private StockListDTO calculateStockRankingInfo(Stock stock, List<Report> stockReports, Integer latestClosePrice) {
+        Double upsidePotential = null;
+        Double buyRatio = null;
+
+        if (stockReports != null && !stockReports.isEmpty()) {
+            try {
+                // 애널리스트별로 최신 리포트만 선택
+                Map<Long, Report> latestReportByAnalyst = new HashMap<>();
+                for (Report report : stockReports) {
+                    Long analystId = report.getAnalyst().getId();
+                    if (!latestReportByAnalyst.containsKey(analystId)) {
+                        latestReportByAnalyst.put(analystId, report);
+                    }
+                }
+
+                List<Report> validReports = new ArrayList<>(latestReportByAnalyst.values());
+
+                // surfaceOpinion 별 개수 계산 (매수비율용)
+                int buyCount = (int) validReports.stream()
+                        .filter(report -> report.getSurfaceOpinion() != null)
+                        .filter(report -> report.getSurfaceOpinion() == SurfaceOpinion.BUY)
+                        .count();
+
+                int holdCount = (int) validReports.stream()
+                        .filter(report -> report.getSurfaceOpinion() != null)
+                        .filter(report -> report.getSurfaceOpinion() == SurfaceOpinion.HOLD)
+                        .count();
+
+                int sellCount = (int) validReports.stream()
+                        .filter(report -> report.getSurfaceOpinion() != null)
+                        .filter(report -> report.getSurfaceOpinion() == SurfaceOpinion.SELL)
+                        .count();
+
+                int totalOpinions = buyCount + holdCount + sellCount;
+
+                // 매수 비율 계산 (소수점 한자리)
+                if (totalOpinions > 0) {
+                    buyRatio = Math.round((double) buyCount / totalOpinions * 1000.0) / 10.0;
+                }
+
+                // 평균 목표가 계산
+                Double averageTargetPrice = validReports.stream()
+                        .map(Report::getTargetPrice)
+                        .filter(Objects::nonNull)
+                        .mapToInt(Integer::intValue)
+                        .average()
+                        .orElse(0.0);
+
+                // 상승 여력 계산 (소수점 한자리)
+                if (latestClosePrice != null && latestClosePrice > 0 && averageTargetPrice > 0) {
+                    upsidePotential = ((averageTargetPrice - latestClosePrice) / latestClosePrice) * 100;
+                    upsidePotential = Math.round(upsidePotential * 10.0) / 10.0;
+                }
+            } catch (Exception e) {
+                // 계산 오류 시 null 유지
+            }
+        }
+
+        return StockListDTO.builder()
+                .id(stock.getId())
+                .stockName(stock.getStockName())
+                .stockCode(stock.getStockCode())
+                .sector(stock.getSector())
+                .upsidePotential(upsidePotential)
+                .buyRatio(buyRatio)
+                .build();
     }
 
     //code는 크롤링 데이터용 식별자 -> 크롤링 시 코드 기준으로 리포트 검색.
