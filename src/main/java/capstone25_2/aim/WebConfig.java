@@ -13,7 +13,8 @@ public class WebConfig implements WebMvcConfigurer {
                 .allowedOrigins(
                         "http://localhost:3000",
                         "https://front-end-peach-pi.vercel.app",
-                        "http://localhost:5173"
+                        "http://localhost:5173",
+                        "https://aim-backend.store"
                 )
                 .allowedMethods("GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS")
                 .allowedHeaders("*")
