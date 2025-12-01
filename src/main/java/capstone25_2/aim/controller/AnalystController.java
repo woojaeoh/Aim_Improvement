@@ -6,6 +6,7 @@ import capstone25_2.aim.domain.dto.analyst.AnalystResponseDTO;
 import capstone25_2.aim.domain.dto.analyst.CoveredStockDTO;
 import capstone25_2.aim.domain.entity.Analyst;
 import capstone25_2.aim.service.AnalystService;
+import io.swagger.v3.oas.annotations.Operation;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
@@ -20,6 +21,9 @@ public class AnalystController {
 
     // 애널리스트 상세 조회 (지표 + 커버 종목 + 리포트 목록)
     @GetMapping("/{analystId}")
+    @Operation(
+            summary = "애널리스트 상세 페이지"
+    )
     public AnalystResponseDTO getAnalystById(@PathVariable Long analystId) {
         Analyst analyst = analystService.getAnalystById(analystId)
                 .orElseThrow(() -> new RuntimeException("Analyst not found"));
