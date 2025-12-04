@@ -541,8 +541,8 @@ public class AnalystMetricsService {
      *
      * 실제 결과 분류 (목표가 기준):
      * - BUY: 1년 후 실제 주가 >= 목표가
-     * - HOLD: 목표가 * 0.9 <= 실제 주가 < 목표가 (목표가 ±10% 범위)
-     * - SELL: 실제 주가 < 목표가 * 0.9
+     * - HOLD: 목표가 * 0.75 <= 실제 주가 < 목표가 (목표가 ±10% 범위)
+     * - SELL: 실제 주가 < 목표가 * 0.75
      *
      * @param hiddenOpinion 숨겨진 의견 (0.0 ~ 1.0)
      * @param targetPrice 목표가
@@ -562,9 +562,9 @@ public class AnalystMetricsService {
 
         // 2. 실제 주가를 3단계로 분류 (목표가 기준)
         String actualCategory;
-        if (actualPrice >= targetPrice) {
+        if (actualPrice >= targetPrice* 0.8) {
             actualCategory = "BUY";  // 목표가 이상 달성
-        } else if (actualPrice >= targetPrice * 0.75) {
+        } else if (actualPrice >= targetPrice * 0.7) {
             actualCategory = "HOLD";  // 목표가 75% ~ 100% 사이
         } else {
             actualCategory = "SELL";  // 목표가 75% 미달
