@@ -223,11 +223,15 @@ public class SectorService {
      * 종목의 다수결 의견 계산 (5단계)
      * 각 애널리스트의 의견 변화 이후 최신 리포트들의 hiddenOpinion을 5단계로 변환하여 다수결 적용
      *
-     * 기존 ReportService.getStockConsensus()와 동일한 로직 사용
+     * 로직:
      * - 애널리스트별로 그룹핑
      * - 각 애널리스트의 최신 리포트 선택 (1년 이내 리포트만)
      * - hiddenOpinion을 5단계로 변환
-     * - 가장 많은 의견을 다수결로 선택
+     * - 가장 많은 의견을 다수결로 선택 (동점 시 보수적 의견 우선: HOLD > SELL > STRONG_SELL > BUY > STRONG_BUY)
+     * - BUY인 경우 매수 비율(BUY+STRONG_BUY)에 따라 조정:
+     *   · 80% 이상 → STRONG_BUY로 업그레이드
+     *   · 40% 이하 → HOLD로 다운그레이드
+     *   · 그 외 → BUY 유지
      *
      * @param stockReports 종목의 최근 5년 리포트 리스트
      * @return 다수결 의견 (HiddenOpinionLabel)
@@ -265,11 +269,45 @@ public class SectorService {
             return null;
         }
 
-        // 4. 가장 많은 의견 반환 (다수결)
-        return opinionCounts.entrySet().stream()
-                .max(Map.Entry.comparingByValue())
+        // 4. 가장 많은 의견 반환 (다수결, 동점 시 보수적 의견 우선)
+        long maxCount = opinionCounts.values().stream().mapToLong(Long::longValue).max().orElse(0L);
+
+        // 동점인 의견들을 보수적 우선순위로 정렬하여 선택
+        // 우선순위: HOLD > SELL > STRONG_SELL > BUY > STRONG_BUY
+        HiddenOpinionLabel majorityOpinion = opinionCounts.entrySet().stream()
+                .filter(entry -> entry.getValue() == maxCount)
                 .map(Map.Entry::getKey)
+                .min(Comparator.comparingInt(label -> {
+                    switch (label) {
+                        case HOLD: return 0;
+                        case SELL: return 1;
+                        case STRONG_SELL: return 2;
+                        case BUY: return 3;
+                        case STRONG_BUY: return 4;
+                        default: return 5;
+                    }
+                }))
                 .orElse(null);
+
+        // 5. BUY인 경우, 매수 비율에 따라 조정
+        if (majorityOpinion == HiddenOpinionLabel.BUY) {
+            long buyCount = opinionCounts.getOrDefault(HiddenOpinionLabel.BUY, 0L);
+            long strongBuyCount = opinionCounts.getOrDefault(HiddenOpinionLabel.STRONG_BUY, 0L);
+            long totalCount = opinionCounts.values().stream().mapToLong(Long::longValue).sum();
+
+            double buyRatio = (double) (buyCount + strongBuyCount) / totalCount;
+
+            // 매수 비율 80% 이상 -> STRONG_BUY로 업그레이드
+            if (buyRatio >= 0.8) {
+                return HiddenOpinionLabel.STRONG_BUY;
+            }
+            // 매수 비율 40% 이하 -> HOLD로 다운그레이드
+            else if (buyRatio <= 0.4) {
+                return HiddenOpinionLabel.HOLD;
+            }
+        }
+
+        return majorityOpinion;
     }
 
     /**
