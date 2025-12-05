@@ -215,41 +215,66 @@ public class StockService {
                 .collect(Collectors.toList());
     }
 
-    // 날짜별 애널리스트 평균 목표주가 계산 (오늘 기준 1년 미만 리포트)
+    // 날짜별 애널리스트 평균 목표주가 계산 (최근 2년간 매일 데이터, Forward Fill 방식)
     @Transactional(readOnly = true)
     public List<DailyAverageTargetPriceDTO> getDailyAverageTargetPrices(Long stockId) {
-        LocalDateTime oneYearAgo = LocalDateTime.now().minusYears(1);
+        LocalDate today = LocalDate.now();
+        LocalDate startDate = today.minusYears(2);
+        LocalDateTime startDateTime = startDate.atStartOfDay();
+
+        // 2년간의 모든 리포트 조회
         List<Report> validReports = reportRepository
-                .findByStockIdAndReportDateAfterOrderByReportDateDesc(stockId, oneYearAgo);
+                .findByStockIdAndReportDateAfterOrderByReportDateDesc(stockId, startDateTime);
 
         if (validReports.isEmpty()) {
             return List.of();
         }
 
-        // 날짜별로 그룹핑
-        Map<LocalDate, List<Report>> reportsByDate = validReports.stream()
-                .collect(Collectors.groupingBy(report -> report.getReportDate().toLocalDate()));
+        List<DailyAverageTargetPriceDTO> result = new ArrayList<>();
+        Double previousAverage = null;
 
-        // 각 날짜별 평균 목표가 계산
-        return reportsByDate.entrySet().stream()
-                .map(entry -> {
-                    LocalDate date = entry.getKey();
-                    List<Report> reportsOnDate = entry.getValue();
+        // 2년간의 모든 날짜를 순회
+        for (LocalDate date = startDate; !date.isAfter(today); date = date.plusDays(1)) {
+            final LocalDate currentDate = date;
 
-                    Double averageTargetPrice = reportsOnDate.stream()
-                            .map(Report::getTargetPrice)
-                            .filter(Objects::nonNull)
-                            .mapToInt(Integer::intValue)
-                            .average()
-                            .orElse(0.0);
+            // 해당 날짜 이전에 발행된 리포트들만 필터링
+            List<Report> reportsUntilDate = validReports.stream()
+                    .filter(report -> !report.getReportDate().toLocalDate().isAfter(currentDate))
+                    .collect(Collectors.toList());
 
-                    return DailyAverageTargetPriceDTO.builder()
-                            .date(date)
-                            .averageTargetPrice(averageTargetPrice)
-                            .build();
-                })
-                .sorted(Comparator.comparing(DailyAverageTargetPriceDTO::getDate))
-                .collect(Collectors.toList());
+            if (!reportsUntilDate.isEmpty()) {
+                // 애널리스트별 가장 최근 리포트만 선택
+                Map<Long, Report> latestReportByAnalyst = reportsUntilDate.stream()
+                        .collect(Collectors.toMap(
+                                report -> report.getAnalyst().getId(),
+                                report -> report,
+                                (r1, r2) -> r1.getReportDate().isAfter(r2.getReportDate()) ? r1 : r2
+                        ));
+
+                // 평균 목표가 계산
+                Double averageTargetPrice = latestReportByAnalyst.values().stream()
+                        .map(Report::getTargetPrice)
+                        .filter(Objects::nonNull)
+                        .mapToInt(Integer::intValue)
+                        .average()
+                        .orElse(previousAverage != null ? previousAverage : 0.0);
+
+                previousAverage = averageTargetPrice;
+
+                result.add(DailyAverageTargetPriceDTO.builder()
+                        .date(currentDate)
+                        .averageTargetPrice(averageTargetPrice)
+                        .build());
+            } else if (previousAverage != null) {
+                // Forward Fill: 리포트가 없으면 이전 평균값 유지
+                result.add(DailyAverageTargetPriceDTO.builder()
+                        .date(currentDate)
+                        .averageTargetPrice(previousAverage)
+                        .build());
+            }
+        }
+
+        return result;
     }
 
     // 현재 기준 목표가 통계 (최대/평균/최소, 오늘 기준 1년 미만 리포트)
