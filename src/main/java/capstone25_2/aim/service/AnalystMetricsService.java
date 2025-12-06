@@ -378,8 +378,8 @@ public class AnalystMetricsService {
             return null; // 필요한 데이터가 없으면 평가 불가
         }
 
-        // 1. 정확도 판단 (hiddenOpinion 기준)
-        boolean isCorrect = isOpinionCorrect(hiddenOpinion, targetPrice, comparePrice);
+        // 1. 정확도 판단 (hiddenOpinion 기준 - 방향성 평가)
+        boolean isCorrect = isOpinionCorrect(hiddenOpinion, reportDatePrice, comparePrice);
 
         // 2. 수익률 계산: (비교 시점 주가 - 발행 시점 주가) / 발행 시점 주가 * 100
         double returnRate = ((double) (comparePrice - reportDatePrice) / reportDatePrice) * 100.0;
@@ -475,8 +475,8 @@ public class AnalystMetricsService {
             return null; // 목표가나 발행시점 주가가 없으면 평가 불가
         }
 
-        // 4. 정확도 판단
-        boolean isCorrect = isOpinionCorrect(hiddenOpinion, targetPrice, oneYearLaterPrice);
+        // 4. 정확도 판단 (방향성 평가)
+        boolean isCorrect = isOpinionCorrect(hiddenOpinion, reportDatePrice, oneYearLaterPrice);
 
         // 5. 수익률 계산: (1년 후 종가 - 리포트 발행시점 종가) / 리포트 발행시점 종가 * 100
         double returnRate = ((double) (oneYearLaterPrice - reportDatePrice) / reportDatePrice) * 100.0;
@@ -542,18 +542,18 @@ public class AnalystMetricsService {
      * - HOLD: 0.17 <= hiddenOpinion < 0.5
      * - SELL: hiddenOpinion < 0.17
      *
-     * 실제 결과 분류 (목표가 기준):
-     * - BUY: 1년 후 실제 주가 >= 목표가
-     * - HOLD: 목표가 * 0.75 <= 실제 주가 < 목표가 (목표가 ±10% 범위)
-     * - SELL: 실제 주가 < 목표가 * 0.75
+     * 실제 결과 분류 (방향성 기준):
+     * - BUY: 1년 후 실제 주가 > 발행 시점 종가 (상승)
+     * - HOLD: -10% <= 수익률 <= +10% (±10% 이내 유지)
+     * - SELL: 1년 후 실제 주가 < 발행 시점 종가 (하락)
      *
      * @param hiddenOpinion 숨겨진 의견 (0.0 ~ 1.0)
-     * @param targetPrice 목표가
-     * @param actualPrice 1년 후 실제 주가
+     * @param reportDatePrice 리포트 발행 시점 종가
+     * @param actualPrice 1년 후 실제 주가 (또는 의견 변화 시점 주가)
      * @return 예측과 실제가 일치하는지 여부
      */
-    private boolean isOpinionCorrect(Double hiddenOpinion, Integer targetPrice, Integer actualPrice) {
-        if (hiddenOpinion == null || targetPrice == null || actualPrice == null || targetPrice == 0) {
+    private boolean isOpinionCorrect(Double hiddenOpinion, Integer reportDatePrice, Integer actualPrice) {
+        if (hiddenOpinion == null || reportDatePrice == null || actualPrice == null || reportDatePrice == 0) {
             return false;
         }
 
@@ -563,17 +563,20 @@ public class AnalystMetricsService {
             return false;
         }
 
-        // 2. 실제 주가를 3단계로 분류 (목표가 기준)
+        // 2. 실제 수익률 계산
+        double returnRate = ((double) (actualPrice - reportDatePrice) / reportDatePrice) * 100.0;
+
+        // 3. 실제 주가 변동을 3단계로 분류 (방향성 기준)
         String actualCategory;
-        if (actualPrice >= targetPrice* 0.8) {
-            actualCategory = "BUY";  // 목표가 이상 달성
-        } else if (actualPrice >= targetPrice * 0.7) {
-            actualCategory = "HOLD";  // 목표가 75% ~ 100% 사이
+        if (returnRate > 10.0) {
+            actualCategory = "BUY";  // 10% 초과 상승
+        } else if (returnRate >= -10.0) {
+            actualCategory = "HOLD";  // ±10% 이내 유지
         } else {
-            actualCategory = "SELL";  // 목표가 75% 미달
+            actualCategory = "SELL";  // 10% 이상 하락
         }
 
-        // 3. 예측과 실제가 일치하면 정답
+        // 4. 예측과 실제가 일치하면 정답
         return predictedCategory.equals(actualCategory);
     }
 
@@ -762,9 +765,9 @@ public class AnalystMetricsService {
                         AnalystMetrics::getAvgTargetDiff);  // 낮을수록 높은 백분위
 
                 // 가중 백분위 합계 계산
-                double weightedPercentile = (returnPercentile * 0.35) +
-                        (returnDiffPercentile * 0.25) +
-                        (accuracyPercentile * 0.25) +
+                double weightedPercentile = (returnPercentile * 0.3) +
+                        (returnDiffPercentile * 0.15) +
+                        (accuracyPercentile * 0.4) +
                         (targetDiffPercentile * 0.15);
 
                 // 최종 점수 계산 (40~100점 범위)
