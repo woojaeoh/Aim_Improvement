@@ -50,9 +50,11 @@ public class StockService {
                 .map(Stock::getId)
                 .collect(Collectors.toList());
 
-        // 3. 모든 리포트를 한 번에 조회 (쿼리 1개) - 날짜 제한 없음
+        // 3. 최근 1년간의 리포트를 한 번에 조회 (쿼리 1개)
+        LocalDateTime oneYearAgo = LocalDateTime.now().minusYears(1);
         List<Report> allReports = reportRepository.findAll().stream()
                 .filter(report -> stockIds.contains(report.getStock().getId()))
+                .filter(report -> report.getReportDate().isAfter(oneYearAgo))
                 .sorted(Comparator.comparing(Report::getReportDate).reversed())
                 .collect(Collectors.toList());
 

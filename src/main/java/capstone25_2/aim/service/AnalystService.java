@@ -80,11 +80,41 @@ public class AnalystService {
                 .collect(Collectors.toList());
     }
 
-    // 애널리스트 지표 조회
+    // 애널리스트 지표 조회 (순위 포함)
     @Transactional(readOnly = true)
     public AnalystMetricsDTO getAnalystMetrics(Long analystId) {
-        Optional<AnalystMetrics> metrics = analystMetricsRepository.findByAnalystId(analystId);
-        return metrics.map(AnalystMetricsDTO::fromEntity).orElse(null);
+        Optional<AnalystMetrics> metricsOpt = analystMetricsRepository.findByAnalystId(analystId);
+
+        if (metricsOpt.isEmpty()) {
+            return null;
+        }
+
+        AnalystMetrics metrics = metricsOpt.get();
+
+        // 전체 애널리스트 순위 계산 (aimsScore 기준 내림차순)
+        List<AnalystMetrics> allMetrics = analystMetricsRepository.findAll();
+        int totalAnalysts = allMetrics.size();
+
+        List<AnalystMetrics> sortedByScore = allMetrics.stream()
+                .filter(m -> m.getAimsScore() != null)
+                .sorted(Comparator.comparing(AnalystMetrics::getAimsScore).reversed())
+                .toList();
+
+        // 현재 애널리스트의 순위 찾기
+        Integer rank = null;
+        for (int i = 0; i < sortedByScore.size(); i++) {
+            if (sortedByScore.get(i).getId().equals(metrics.getId())) {
+                rank = i + 1;
+                break;
+            }
+        }
+
+        // DTO 생성 후 순위 정보 추가
+        AnalystMetricsDTO dto = AnalystMetricsDTO.fromEntity(metrics);
+        dto.setRank(rank);
+        dto.setTotalAnalysts(totalAnalysts);
+
+        return dto;
     }
 
 }
