@@ -135,26 +135,35 @@ public class ReportService {
             validReportsAfterOpinionChange.add(latestValidReport);
         }
 
-        // 5. surfaceOpinion이 null이 아닌 것만 필터링
+        // 5. hiddenOpinion이 null이 아닌 것만 필터링
         List<Report> validReports = validReportsAfterOpinionChange.stream()
-                .filter(report -> report.getSurfaceOpinion() != null)
+                .filter(report -> report.getHiddenOpinion() != null)
                 .collect(Collectors.toList());
 
         if (validReports.isEmpty()) {
-            throw new RuntimeException("No valid surfaceOpinion data found");
+            throw new RuntimeException("No valid hiddenOpinion data found");
         }
 
-        // 6. surfaceOpinion 별 개수 계산
+        // 6. hiddenOpinion 별 개수 계산 (3단계 분류)
         int buyCount = (int) validReports.stream()
-                .filter(report -> report.getSurfaceOpinion() == SurfaceOpinion.BUY)
+                .filter(report -> {
+                    String category = HiddenOpinionLabel.toSimpleCategory(report.getHiddenOpinion());
+                    return "BUY".equals(category);
+                })
                 .count();
 
         int holdCount = (int) validReports.stream()
-                .filter(report -> report.getSurfaceOpinion() == SurfaceOpinion.HOLD)
+                .filter(report -> {
+                    String category = HiddenOpinionLabel.toSimpleCategory(report.getHiddenOpinion());
+                    return "HOLD".equals(category);
+                })
                 .count();
 
         int sellCount = (int) validReports.stream()
-                .filter(report -> report.getSurfaceOpinion() == SurfaceOpinion.SELL)
+                .filter(report -> {
+                    String category = HiddenOpinionLabel.toSimpleCategory(report.getHiddenOpinion());
+                    return "SELL".equals(category);
+                })
                 .count();
 
         // 7. 평균 목표가 계산
