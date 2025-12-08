@@ -12,6 +12,7 @@ import capstone25_2.aim.repository.ReportRepository;
 import capstone25_2.aim.repository.StockRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.*;
@@ -33,6 +34,7 @@ public class SectorService {
      * 1) 모든 종목 조회
      * 2) 모든 종목의 최근 5년 리포트 한 번에 조회
      */
+    @Transactional(readOnly = true)
     public List<SectorListDTO> getAllSectors() {
         // 1. 모든 종목 조회 (쿼리 1개)
         List<Stock> allStocks = stockRepository.findAll();
@@ -92,6 +94,7 @@ public class SectorService {
      * 2) 해당 섹터 종목들의 최근 5년 리포트 한 번에 조회
      * 3) 해당 섹터 종목들의 최신 종가 한 번에 조회
      */
+    @Transactional(readOnly = true)
     public SectorResponseDTO getSectorDetails(String sectorName) {
         // 1. 해당 섹터의 모든 종목 조회 (쿼리 1개)
         List<Stock> stocks = stockRepository.findBySector(sectorName);
@@ -220,11 +223,15 @@ public class SectorService {
      * 종목의 다수결 의견 계산 (5단계)
      * 각 애널리스트의 의견 변화 이후 최신 리포트들의 hiddenOpinion을 5단계로 변환하여 다수결 적용
      *
-     * 기존 ReportService.getStockConsensus()와 동일한 로직 사용
+     * 로직:
      * - 애널리스트별로 그룹핑
-     * - 각 애널리스트의 최신 리포트 선택 (의견 변화는 고려하지 않음 - 간소화)
+     * - 각 애널리스트의 최신 리포트 선택 (1년 이내 리포트만)
      * - hiddenOpinion을 5단계로 변환
-     * - 가장 많은 의견을 다수결로 선택
+     * - 가장 많은 의견을 다수결로 선택 (동점 시 보수적 의견 우선: HOLD > SELL > STRONG_SELL > BUY > STRONG_BUY)
+     * - BUY인 경우 매수 비율(BUY+STRONG_BUY)에 따라 조정:
+     *   · 80% 이상 → STRONG_BUY로 업그레이드
+     *   · 40% 이하 → HOLD로 다운그레이드
+     *   · 그 외 → BUY 유지
      *
      * @param stockReports 종목의 최근 5년 리포트 리스트
      * @return 다수결 의견 (HiddenOpinionLabel)
@@ -238,12 +245,17 @@ public class SectorService {
         Map<Long, List<Report>> reportsByAnalyst = stockReports.stream()
                 .collect(Collectors.groupingBy(report -> report.getAnalyst().getId()));
 
-        // 2. 각 애널리스트의 최신 리포트만 선택
+        // 2. 각 애널리스트의 최신 리포트만 선택 (1년 이내 리포트만)
+        LocalDateTime oneYearAgo = LocalDateTime.now().minusYears(1);
         List<Report> latestReportsByAnalyst = new ArrayList<>();
         for (List<Report> analystReports : reportsByAnalyst.values()) {
             // 이미 날짜 내림차순으로 정렬되어 있으므로 첫 번째가 최신
             if (!analystReports.isEmpty()) {
-                latestReportsByAnalyst.add(analystReports.get(0));
+                Report latestReport = analystReports.get(0);
+                // 최신 리포트가 1년 이내인 경우만 포함
+                if (latestReport.getReportDate().isAfter(oneYearAgo)) {
+                    latestReportsByAnalyst.add(latestReport);
+                }
             }
         }
 
@@ -257,11 +269,45 @@ public class SectorService {
             return null;
         }
 
-        // 4. 가장 많은 의견 반환 (다수결)
-        return opinionCounts.entrySet().stream()
-                .max(Map.Entry.comparingByValue())
+        // 4. 가장 많은 의견 반환 (다수결, 동점 시 보수적 의견 우선)
+        long maxCount = opinionCounts.values().stream().mapToLong(Long::longValue).max().orElse(0L);
+
+        // 동점인 의견들을 보수적 우선순위로 정렬하여 선택
+        // 우선순위: HOLD > SELL > STRONG_SELL > BUY > STRONG_BUY
+        HiddenOpinionLabel majorityOpinion = opinionCounts.entrySet().stream()
+                .filter(entry -> entry.getValue() == maxCount)
                 .map(Map.Entry::getKey)
+                .min(Comparator.comparingInt(label -> {
+                    switch (label) {
+                        case HOLD: return 0;
+                        case SELL: return 1;
+                        case STRONG_SELL: return 2;
+                        case BUY: return 3;
+                        case STRONG_BUY: return 4;
+                        default: return 5;
+                    }
+                }))
                 .orElse(null);
+
+        // 5. BUY인 경우, 매수 비율에 따라 조정
+        if (majorityOpinion == HiddenOpinionLabel.BUY) {
+            long buyCount = opinionCounts.getOrDefault(HiddenOpinionLabel.BUY, 0L);
+            long strongBuyCount = opinionCounts.getOrDefault(HiddenOpinionLabel.STRONG_BUY, 0L);
+            long totalCount = opinionCounts.values().stream().mapToLong(Long::longValue).sum();
+
+            double buyRatio = (double) (buyCount + strongBuyCount) / totalCount;
+
+            // 매수 비율 80% 이상 -> STRONG_BUY로 업그레이드
+            if (buyRatio >= 0.8) {
+                return HiddenOpinionLabel.STRONG_BUY;
+            }
+            // 매수 비율 40% 이하 -> HOLD로 다운그레이드
+            else if (buyRatio <= 0.4) {
+                return HiddenOpinionLabel.HOLD;
+            }
+        }
+
+        return majorityOpinion;
     }
 
     /**
@@ -291,22 +337,30 @@ public class SectorService {
         Map<Long, List<Report>> reportsByAnalyst = stockReports.stream()
                 .collect(Collectors.groupingBy(report -> report.getAnalyst().getId()));
 
-        // 2. 각 애널리스트의 최신 리포트만 선택
+        // 2. 각 애널리스트의 최신 리포트만 선택 (1년 이내 리포트만)
+        LocalDateTime oneYearAgo = LocalDateTime.now().minusYears(1);
         List<Report> latestReportsByAnalyst = new ArrayList<>();
         for (List<Report> analystReports : reportsByAnalyst.values()) {
             if (!analystReports.isEmpty()) {
-                latestReportsByAnalyst.add(analystReports.get(0));
+                Report latestReport = analystReports.get(0);
+                // 최신 리포트가 1년 이내인 경우만 포함
+                if (latestReport.getReportDate().isAfter(oneYearAgo)) {
+                    latestReportsByAnalyst.add(latestReport);
+                }
             }
         }
 
-        // 3. surfaceOpinion 별 개수 계산 (매수비율용)
+        // 3. hiddenOpinion 별 개수 계산 (매수비율용)
         int buyCount = (int) latestReportsByAnalyst.stream()
-                .filter(report -> report.getSurfaceOpinion() != null)
-                .filter(report -> report.getSurfaceOpinion().name().equals("BUY"))
+                .filter(report -> report.getHiddenOpinion() != null)
+                .filter(report -> {
+                    String category = HiddenOpinionLabel.toSimpleCategory(report.getHiddenOpinion());
+                    return "BUY".equals(category);
+                })
                 .count();
 
         int totalOpinions = (int) latestReportsByAnalyst.stream()
-                .filter(report -> report.getSurfaceOpinion() != null)
+                .filter(report -> report.getHiddenOpinion() != null)
                 .count();
 
         // 4. 매수 비율 계산 (소수점 첫째자리)
@@ -315,8 +369,9 @@ public class SectorService {
             buyRatio = Math.round((double) buyCount / totalOpinions * 1000.0) / 10.0;
         }
 
-        // 5. 평균 목표가 계산
+        // 5. 평균 목표가 계산 (hiddenOpinion이 있는 리포트만 사용)
         Double averageTargetPrice = latestReportsByAnalyst.stream()
+                .filter(report -> report.getHiddenOpinion() != null)
                 .map(Report::getTargetPrice)
                 .filter(Objects::nonNull)
                 .mapToInt(Integer::intValue)

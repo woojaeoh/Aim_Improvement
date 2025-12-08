@@ -21,6 +21,7 @@ public class AnalystMetrics {
     private Double avgReturnDiff; //애널리스트 평균대비 수익률 오차
     private Double avgTargetDiff; //애널리스트 평균 대비 목표가 오차율
     private Integer aimsScore; //aim's score (40~100점)
+    private Integer reportCount; //평가 가능한 리포트 개수
 
     private LocalDateTime updatedAt;
 

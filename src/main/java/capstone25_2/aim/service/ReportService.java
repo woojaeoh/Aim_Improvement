@@ -39,10 +39,10 @@ public class ReportService {
         return reportRepository.findById(reportId);
     }
 
-    // 최신 5년의 리포트 리스트 조회 (종목별)
+    // 최신 1년의 리포트 리스트 조회 (종목별)
     public List<Report> getRecentReportsByStockId(Long stockId){
-        LocalDateTime fiveYearsAgo = LocalDateTime.now().minusYears(5);
-        return reportRepository.findByStockIdAndReportDateAfterOrderByReportDateDesc(stockId, fiveYearsAgo);
+        LocalDateTime oneYearAgo = LocalDateTime.now().minusYears(1);
+        return reportRepository.findByStockIdAndReportDateAfterOrderByReportDateDesc(stockId, oneYearAgo);
     }
 
     // 최신 5년의 리포트 리스트 조회 (애널리스트별)
@@ -52,6 +52,7 @@ public class ReportService {
     }
 
     // 종목별 목표가 변동 추이 데이터 생성
+    @Transactional(readOnly = true)
     public TargetPriceTrendResponseDTO getTargetPriceTrend(Long stockId){
         List<Report> recentReports = getRecentReportsByStockId(stockId);
 
@@ -87,14 +88,15 @@ public class ReportService {
     /**
      * 종목별 surfaceOpinion 종합 의견 조회
      * 각 애널리스트의 의견 변화 이후 최신 리포트만 집계 (BUY, HOLD, SELL 개수)
-     * 의견 변화가 없으면 최근 5년 리포트 중 최신 리포트 사용
+     * 의견 변화가 없으면 최근 1년 리포트 중 최신 리포트 사용
      */
+    @Transactional(readOnly = true)
     public StockConsensusDTO getStockConsensus(Long stockId) {
         // 1. 종목 조회
         Stock stock = stockRepository.findById(stockId)
                 .orElseThrow(() -> new RuntimeException("Stock not found"));
 
-        // 2. 해당 종목의 최근 5년 리포트 조회
+        // 2. 해당 종목의 최근 1년 리포트 조회
         List<Report> recentReports = getRecentReportsByStockId(stockId);
 
         if (recentReports.isEmpty()) {
@@ -133,29 +135,38 @@ public class ReportService {
             validReportsAfterOpinionChange.add(latestValidReport);
         }
 
-        // 5. surfaceOpinion이 null이 아닌 것만 필터링
+        // 5. hiddenOpinion이 null이 아닌 것만 필터링
         List<Report> validReports = validReportsAfterOpinionChange.stream()
-                .filter(report -> report.getSurfaceOpinion() != null)
+                .filter(report -> report.getHiddenOpinion() != null)
                 .collect(Collectors.toList());
 
         if (validReports.isEmpty()) {
-            throw new RuntimeException("No valid surfaceOpinion data found");
+            throw new RuntimeException("No valid hiddenOpinion data found");
         }
 
-        // 6. surfaceOpinion 별 개수 계산
+        // 6. hiddenOpinion 별 개수 계산 (3단계 분류)
         int buyCount = (int) validReports.stream()
-                .filter(report -> report.getSurfaceOpinion() == SurfaceOpinion.BUY)
+                .filter(report -> {
+                    String category = HiddenOpinionLabel.toSimpleCategory(report.getHiddenOpinion());
+                    return "BUY".equals(category);
+                })
                 .count();
 
         int holdCount = (int) validReports.stream()
-                .filter(report -> report.getSurfaceOpinion() == SurfaceOpinion.HOLD)
+                .filter(report -> {
+                    String category = HiddenOpinionLabel.toSimpleCategory(report.getHiddenOpinion());
+                    return "HOLD".equals(category);
+                })
                 .count();
 
         int sellCount = (int) validReports.stream()
-                .filter(report -> report.getSurfaceOpinion() == SurfaceOpinion.SELL)
+                .filter(report -> {
+                    String category = HiddenOpinionLabel.toSimpleCategory(report.getHiddenOpinion());
+                    return "SELL".equals(category);
+                })
                 .count();
 
-        // 7. 평균 목표가 계산
+        // 7. 애널리스트 평균 목표가 계산 (기존 로직 유지)
         Double averageTargetPrice = validReports.stream()
                 .map(Report::getTargetPrice)
                 .filter(Objects::nonNull)
@@ -163,19 +174,42 @@ public class ReportService {
                 .average()
                 .orElse(0.0);
 
-        // 8. 현재 종가 조회 및 상승 여력 계산
-        Double upsidePotential = null;
+        // 8. 현재 종가 조회
         List<ClosePrice> closePrices = closePriceRepository.findByStockIdOrderByTradeDateDesc(stockId);
-        if (!closePrices.isEmpty() && averageTargetPrice > 0) {
-            Integer currentClosePrice = closePrices.get(0).getClosePrice();
-            if (currentClosePrice != null && currentClosePrice > 0) {
-                upsidePotential = ((averageTargetPrice - currentClosePrice) / currentClosePrice) * 100;
-                // 소수점 둘째자리까지 반올림
-                upsidePotential = Math.round(upsidePotential * 100.0) / 100.0;
-            }
+        Integer currentClosePrice = !closePrices.isEmpty() ? closePrices.get(0).getClosePrice() : null;
+
+        // 9. AIM's 평균 목표가 계산 (BUY/HOLD: 실제 목표가, SELL: 발행일 종가 × 0.8)
+        Double aimsAverageTargetPrice = validReports.stream()
+                .mapToDouble(report -> {
+                    String category = HiddenOpinionLabel.toSimpleCategory(report.getHiddenOpinion());
+                    // BUY, HOLD는 실제 목표가 사용
+                    if ("BUY".equals(category) || "HOLD".equals(category)) {
+                        return report.getTargetPrice() != null ? report.getTargetPrice() : 0.0;
+                    }
+                    // SELL은 발행일 종가 × 0.8
+                    else if ("SELL".equals(category)) {
+                        LocalDate reportDate = report.getReportDate().toLocalDate();
+                        Optional<ClosePrice> reportClosePrice = closePriceRepository
+                                .findFirstByStockIdAndTradeDateLessThanEqualOrderByTradeDateDesc(stockId, reportDate);
+                        if (reportClosePrice.isPresent()) {
+                            return reportClosePrice.get().getClosePrice() * 0.8;
+                        }
+                    }
+                    return 0.0;
+                })
+                .filter(price -> price > 0)
+                .average()
+                .orElse(0.0);
+
+        // 10. 상승 여력 계산 (AIM's 평균 목표가 기준)
+        Double upsidePotential = null;
+        if (currentClosePrice != null && currentClosePrice > 0 && aimsAverageTargetPrice > 0) {
+            upsidePotential = ((aimsAverageTargetPrice - currentClosePrice) / currentClosePrice) * 100;
+            // 소수점 둘째자리까지 반올림
+            upsidePotential = Math.round(upsidePotential * 100.0) / 100.0;
         }
 
-        // 9. DTO 생성 및 반환
+        // 11. DTO 생성 및 반환
         return StockConsensusDTO.builder()
                 .stockId(stock.getId())
                 .stockName(stock.getStockName())
@@ -184,6 +218,7 @@ public class ReportService {
                 .holdCount(holdCount)
                 .sellCount(sellCount)
                 .averageTargetPrice(averageTargetPrice)
+                .aimsAverageTargetPrice(aimsAverageTargetPrice)
                 .upsidePotential(upsidePotential)
                 .totalReports(validReports.size())
                 .totalAnalysts(reportsByAnalyst.size())
@@ -307,19 +342,37 @@ public class ReportService {
      */
     @Transactional
     public List<Report> saveReportsFromAIBatch(List<ReportRequestDTO> requestDTOList) {
+        System.out.println("\n🔄 Service 계층 처리 시작: " + requestDTOList.size() + "개 DTO 받음");
+
         // 1. 애널리스트 캐시 생성 (배치 처리 중 중복 조회 방지)
         Map<String, Analyst> analystCache = new HashMap<>();
+
+        // 통계 카운터
+        int stockNotFoundCount = 0;
+        int duplicateCount = 0;
+        int newReportCount = 0;
 
         // 2. 모든 리포트 객체 생성 (아직 DB에 저장하지 않음)
         List<Report> reportsToSave = new ArrayList<>();
         for (ReportRequestDTO requestDTO : requestDTOList) {
-            Report report = saveReportWithCache(requestDTO, analystCache);
-            if (report != null) {  // null이면 스킵된 것
-                reportsToSave.add(report);
+            ReportSaveResult result = saveReportWithCacheAndStats(requestDTO, analystCache);
+
+            if (result == null) {
+                stockNotFoundCount++;
+            } else if (result.isDuplicate) {
+                duplicateCount++;
+            } else {
+                newReportCount++;
+                reportsToSave.add(result.report);
             }
         }
 
-        System.out.println("📦 Batch Insert 시작: " + reportsToSave.size() + "개 리포트");
+        System.out.println("\n📊 Service 계층 통계:");
+        System.out.println("  - 신규 리포트: " + newReportCount + "개");
+        System.out.println("  - 중복 리포트 (스킵): " + duplicateCount + "개");
+        System.out.println("  - Stock 없음 (스킵): " + stockNotFoundCount + "개");
+
+        System.out.println("\n📦 Batch Insert 시작: " + reportsToSave.size() + "개 리포트");
 
         // 3. Batch Insert - 한 번에 저장 (대폭 성능 향상)
         List<Report> savedReports = reportRepository.saveAll(reportsToSave);
@@ -335,20 +388,28 @@ public class ReportService {
         // TODO: 데이터 저장 완료 후 별도 API로 실행
         // analystIds.forEach(analystMetricsService::calculateAndSaveAccuracyRate);
         System.out.println("⚠️ 지표 계산 스킵 (성능 최적화). 저장된 리포트: " + savedReports.size()
-            + "개, 애널리스트: " + analystIds.size() + "명");
+            + "개, 애널리스트: " + analystIds.size() + "명\n");
 
         return savedReports;
     }
 
-    /**
-     * 애널리스트 캐시를 사용하여 리포트 저장 (배치 처리용)
-     */
-    private Report saveReportWithCache(ReportRequestDTO requestDTO, Map<String, Analyst> analystCache) {
-        System.out.println("=== 리포트 저장 시작: " + requestDTO.getReport().getReportTitle());
+    // 저장 결과를 담는 내부 클래스
+    private static class ReportSaveResult {
+        Report report;
+        boolean isDuplicate;
 
+        ReportSaveResult(Report report, boolean isDuplicate) {
+            this.report = report;
+            this.isDuplicate = isDuplicate;
+        }
+    }
+
+    /**
+     * 애널리스트 캐시를 사용하여 리포트 저장 (배치 처리용, 통계 포함)
+     */
+    private ReportSaveResult saveReportWithCacheAndStats(ReportRequestDTO requestDTO, Map<String, Analyst> analystCache) {
         // 1. 캐시에서 Analyst 조회 (analystName + firmName을 키로 사용)
         String cacheKey = requestDTO.getAnalyst().getAnalystName() + "|" + requestDTO.getAnalyst().getFirmName();
-        System.out.println("캐시 키: " + cacheKey);
 
         Analyst analyst = analystCache.computeIfAbsent(cacheKey, key -> {
             // 캐시에 없으면 DB에서 조회 또는 생성
@@ -385,7 +446,7 @@ public class ReportService {
 
         // 이미 존재하면 기존 리포트 반환 (중복 저장 방지)
         if (existingReport.isPresent()) {
-            return existingReport.get();
+            return new ReportSaveResult(existingReport.get(), true);  // 중복
         }
 
         // 4. Report 생성 및 저장
@@ -408,7 +469,7 @@ public class ReportService {
         //         );
         // prevReport.ifPresent(report::setPrevReport);
 
-        return report;  // Batch insert를 위해 save 하지 않고 반환
+        return new ReportSaveResult(report, false);  // 신규 리포트
     }
 
     /**

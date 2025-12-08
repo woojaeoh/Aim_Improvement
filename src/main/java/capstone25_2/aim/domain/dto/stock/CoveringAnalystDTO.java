@@ -26,4 +26,6 @@ public class CoveringAnalystDTO {
     private Double avgReturnDiff;          // 평균 수익 편차
     private Double avgTargetDiff;          // 평균 목표가 편차
     private Integer aimsScore;             // aim's score (40~100점)
+    private Integer rank;                  // 전체 애널리스트 중 순위
+    private Integer totalAnalysts;         // 전체 애널리스트 수
 }
