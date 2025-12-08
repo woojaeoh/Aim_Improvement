@@ -166,7 +166,7 @@ public class ReportService {
                 })
                 .count();
 
-        // 7. 평균 목표가 계산
+        // 7. 애널리스트 평균 목표가 계산 (기존 로직 유지)
         Double averageTargetPrice = validReports.stream()
                 .map(Report::getTargetPrice)
                 .filter(Objects::nonNull)
@@ -174,19 +174,42 @@ public class ReportService {
                 .average()
                 .orElse(0.0);
 
-        // 8. 현재 종가 조회 및 상승 여력 계산
-        Double upsidePotential = null;
+        // 8. 현재 종가 조회
         List<ClosePrice> closePrices = closePriceRepository.findByStockIdOrderByTradeDateDesc(stockId);
-        if (!closePrices.isEmpty() && averageTargetPrice > 0) {
-            Integer currentClosePrice = closePrices.get(0).getClosePrice();
-            if (currentClosePrice != null && currentClosePrice > 0) {
-                upsidePotential = ((averageTargetPrice - currentClosePrice) / currentClosePrice) * 100;
-                // 소수점 둘째자리까지 반올림
-                upsidePotential = Math.round(upsidePotential * 100.0) / 100.0;
-            }
+        Integer currentClosePrice = !closePrices.isEmpty() ? closePrices.get(0).getClosePrice() : null;
+
+        // 9. AIM's 평균 목표가 계산 (BUY/HOLD: 실제 목표가, SELL: 발행일 종가 × 0.8)
+        Double aimsAverageTargetPrice = validReports.stream()
+                .mapToDouble(report -> {
+                    String category = HiddenOpinionLabel.toSimpleCategory(report.getHiddenOpinion());
+                    // BUY, HOLD는 실제 목표가 사용
+                    if ("BUY".equals(category) || "HOLD".equals(category)) {
+                        return report.getTargetPrice() != null ? report.getTargetPrice() : 0.0;
+                    }
+                    // SELL은 발행일 종가 × 0.8
+                    else if ("SELL".equals(category)) {
+                        LocalDate reportDate = report.getReportDate().toLocalDate();
+                        Optional<ClosePrice> reportClosePrice = closePriceRepository
+                                .findFirstByStockIdAndTradeDateLessThanEqualOrderByTradeDateDesc(stockId, reportDate);
+                        if (reportClosePrice.isPresent()) {
+                            return reportClosePrice.get().getClosePrice() * 0.8;
+                        }
+                    }
+                    return 0.0;
+                })
+                .filter(price -> price > 0)
+                .average()
+                .orElse(0.0);
+
+        // 10. 상승 여력 계산 (AIM's 평균 목표가 기준)
+        Double upsidePotential = null;
+        if (currentClosePrice != null && currentClosePrice > 0 && aimsAverageTargetPrice > 0) {
+            upsidePotential = ((aimsAverageTargetPrice - currentClosePrice) / currentClosePrice) * 100;
+            // 소수점 둘째자리까지 반올림
+            upsidePotential = Math.round(upsidePotential * 100.0) / 100.0;
         }
 
-        // 9. DTO 생성 및 반환
+        // 11. DTO 생성 및 반환
         return StockConsensusDTO.builder()
                 .stockId(stock.getId())
                 .stockName(stock.getStockName())
@@ -195,6 +218,7 @@ public class ReportService {
                 .holdCount(holdCount)
                 .sellCount(sellCount)
                 .averageTargetPrice(averageTargetPrice)
+                .aimsAverageTargetPrice(aimsAverageTargetPrice)
                 .upsidePotential(upsidePotential)
                 .totalReports(validReports.size())
                 .totalAnalysts(reportsByAnalyst.size())

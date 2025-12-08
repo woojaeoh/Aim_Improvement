@@ -827,7 +827,7 @@ public class AnalystMetricsService {
                 }
 
                 finalScore = (int) Math.round(rawScore * confidenceWeight);
-                finalScore = Math.min(105, finalScore);  // 최대 100점 제한
+                finalScore = Math.min(105, finalScore);  // 최대 105점 제한
 
                 // 점수 저장
                 metrics.setAimsScore(finalScore);
