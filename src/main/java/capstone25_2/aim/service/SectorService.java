@@ -369,19 +369,35 @@ public class SectorService {
             buyRatio = Math.round((double) buyCount / totalOpinions * 1000.0) / 10.0;
         }
 
-        // 5. 평균 목표가 계산 (hiddenOpinion이 있는 리포트만 사용)
-        Double averageTargetPrice = latestReportsByAnalyst.stream()
+        // 5. AIM's 평균 목표가 계산 (BUY/HOLD: 실제 목표가, SELL: 발행일 종가 × 0.8)
+        Double aimsAverageTargetPrice = latestReportsByAnalyst.stream()
                 .filter(report -> report.getHiddenOpinion() != null)
-                .map(Report::getTargetPrice)
-                .filter(Objects::nonNull)
-                .mapToInt(Integer::intValue)
+                .mapToDouble(report -> {
+                    String category = HiddenOpinionLabel.toSimpleCategory(report.getHiddenOpinion());
+                    // BUY, HOLD는 실제 목표가 사용
+                    if ("BUY".equals(category) || "HOLD".equals(category)) {
+                        return report.getTargetPrice() != null ? report.getTargetPrice() : 0.0;
+                    }
+                    // SELL은 발행일 종가 × 0.8
+                    else if ("SELL".equals(category)) {
+                        java.time.LocalDate reportDate = report.getReportDate().toLocalDate();
+                        java.util.Optional<ClosePrice> reportClosePrice = closePriceRepository
+                                .findFirstByStockIdAndTradeDateLessThanEqualOrderByTradeDateDesc(
+                                        stock.getId(), reportDate);
+                        if (reportClosePrice.isPresent()) {
+                            return reportClosePrice.get().getClosePrice() * 0.8;
+                        }
+                    }
+                    return 0.0;
+                })
+                .filter(price -> price > 0)
                 .average()
                 .orElse(0.0);
 
-        // 6. 상승 여력 계산 (소수점 첫째자리)
+        // 6. 상승 여력 계산 (AIM's 평균 목표가 기준, 소수점 첫째자리)
         Double upsidePotential = null;
-        if (latestClosePrice != null && latestClosePrice > 0 && averageTargetPrice > 0) {
-            upsidePotential = ((averageTargetPrice - latestClosePrice) / latestClosePrice) * 100;
+        if (latestClosePrice != null && latestClosePrice > 0 && aimsAverageTargetPrice > 0) {
+            upsidePotential = ((aimsAverageTargetPrice - latestClosePrice) / latestClosePrice) * 100;
             upsidePotential = Math.round(upsidePotential * 10.0) / 10.0;
         }
 
