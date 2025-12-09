@@ -51,6 +51,19 @@ public class AnalystMetricsService {
 
     // 내부 정렬 로직 (중복 제거)
     private static AnalystRankingResponseDTO createRankedResponse(List<AnalystMetrics> metricsList, String sortBy) {
+        // 1. aimsScore 기준으로 순위 계산 (aimsScore가 null이 아닌 항목만)
+        List<AnalystMetrics> sortedByAimsScore = metricsList.stream()
+                .filter(m -> m.getAimsScore() != null)
+                .sorted(Comparator.comparing(AnalystMetrics::getAimsScore).reversed())
+                .toList();
+
+        // aimsScore 기준 순위를 Map으로 저장
+        Map<Long, Integer> aimsScoreRankMap = new HashMap<>();
+        for (int i = 0; i < sortedByAimsScore.size(); i++) {
+            aimsScoreRankMap.put(sortedByAimsScore.get(i).getId(), i + 1);
+        }
+
+        // 2. sortBy 기준으로 정렬
         Comparator<AnalystMetrics> comparator = switch (sortBy) {
             case "returnRate" -> Comparator.comparing(AnalystMetrics::getReturnRate).reversed();
             case "targetDiffRate" -> Comparator.comparing(AnalystMetrics::getTargetDiffRate); //목표가 오차율은 오름차순 정렬 (낮을수록 좋음)
@@ -70,11 +83,11 @@ public class AnalystMetricsService {
                 .map(AnalystMetricsDTO::fromEntity)
                 .toList();
 
-        // 순위 부여
-        int totalAnalysts = ranking.size();
-        for (int i = 0; i < ranking.size(); i++) {
-            AnalystMetricsDTO dto = ranking.get(i);
-            dto.setRank(i + 1);  // 1부터 시작
+        // 3. aimsScore 기준 순위 부여 (aimsScore 기준 rank 고정)
+        int totalAnalysts = sortedByAimsScore.size();
+        for (AnalystMetricsDTO dto : ranking) {
+            Integer rank = aimsScoreRankMap.get(dto.getId());
+            dto.setRank(rank != null ? rank : 999);  // aimsScore가 없으면 999로 설정
             dto.setTotalAnalysts(totalAnalysts);
         }
 
