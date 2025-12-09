@@ -57,10 +57,10 @@ public class AnalystMetricsService {
                 .sorted(Comparator.comparing(AnalystMetrics::getAimsScore).reversed())
                 .toList();
 
-        // aimsScore 기준 순위를 Map으로 저장
+        // aimsScore 기준 순위를 Map으로 저장 (Analyst ID를 키로 사용)
         Map<Long, Integer> aimsScoreRankMap = new HashMap<>();
         for (int i = 0; i < sortedByAimsScore.size(); i++) {
-            aimsScoreRankMap.put(sortedByAimsScore.get(i).getId(), i + 1);
+            aimsScoreRankMap.put(sortedByAimsScore.get(i).getAnalyst().getId(), i + 1);
         }
 
         // 2. sortBy 기준으로 정렬
@@ -86,7 +86,7 @@ public class AnalystMetricsService {
         // 3. aimsScore 기준 순위 부여 (aimsScore 기준 rank 고정)
         int totalAnalysts = sortedByAimsScore.size();
         for (AnalystMetricsDTO dto : ranking) {
-            Integer rank = aimsScoreRankMap.get(dto.getId());
+            Integer rank = aimsScoreRankMap.get(dto.getAnalystId());
             dto.setRank(rank != null ? rank : 999);  // aimsScore가 없으면 999로 설정
             dto.setTotalAnalysts(totalAnalysts);
         }
