@@ -19,7 +19,7 @@ public class StockConsensusDTO {
 
     // 목표가 통계
     private Double averageTargetPrice;         // 평균 목표가 (의견 변화 이후 리포트 기준, 애널리스트 단순 평균)
-    private Double aimsAverageTargetPrice;     // AIM's 평균 목표가 (BUY/HOLD: 실제 목표가, SELL: 현재가×0.8)
+    private Double aimsAverageTargetPrice;     // AIM's 평균 목표가 (BUY: 실제 목표가, HOLD: 현재가, SELL: 현재가×0.8)
 
     // 상승 여력
     private Double upsidePotential;            // 상승 여력 (%) = (AIM's 평균 목표가 - 현재 종가) / 현재 종가 * 100

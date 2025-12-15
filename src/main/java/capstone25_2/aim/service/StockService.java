@@ -51,6 +51,7 @@ public class StockService {
                 .collect(Collectors.toList());
 
         // 3. 최근 1년간의 리포트를 한 번에 조회 (쿼리 1개)
+
         LocalDateTime oneYearAgo = LocalDateTime.now().minusYears(1);
         List<Report> allReports = reportRepository.findAll().stream()
                 .filter(report -> stockIds.contains(report.getStock().getId()))
@@ -138,18 +139,34 @@ public class StockService {
                     buyRatio = Math.round((double) buyCount / totalOpinions * 1000.0) / 10.0;
                 }
 
-                // AIM's 평균 목표가 계산 (BUY/HOLD: 실제 목표가, SELL: 현재 종가 × 0.8)
+                // AIM's 평균 목표가 계산 (BUY: 실제 목표가, HOLD: 발행일 종가, SELL: 발행일 종가 × 0.8)
                 Double aimsAverageTargetPrice = validReports.stream()
                         .filter(report -> report.getHiddenOpinion() != null)
                         .mapToDouble(report -> {
                             String category = HiddenOpinionLabel.toSimpleCategory(report.getHiddenOpinion());
-                            // BUY, HOLD는 실제 목표가 사용
-                            if ("BUY".equals(category) || "HOLD".equals(category)) {
+                            // BUY는 실제 목표가 사용
+                            if ("BUY".equals(category)) {
                                 return report.getTargetPrice() != null ? report.getTargetPrice() : 0.0;
                             }
-                            // SELL은 현재 종가 × 0.8
+                            // HOLD는 발행일 종가 사용 (변화 없음을 의미)
+                            else if ("HOLD".equals(category)) {
+                                LocalDate reportDate = report.getReportDate().toLocalDate();
+                                Optional<ClosePrice> reportClosePrice = closePriceRepository
+                                        .findFirstByStockIdAndTradeDateLessThanEqualOrderByTradeDateDesc(
+                                                stock.getId(), reportDate);
+                                if (reportClosePrice.isPresent()) {
+                                    return reportClosePrice.get().getClosePrice().doubleValue();
+                                }
+                            }
+                            // SELL은 발행일 종가 × 0.8
                             else if ("SELL".equals(category)) {
-                                return latestClosePrice != null ? latestClosePrice * 0.8 : 0.0;
+                                LocalDate reportDate = report.getReportDate().toLocalDate();
+                                Optional<ClosePrice> reportClosePrice = closePriceRepository
+                                        .findFirstByStockIdAndTradeDateLessThanEqualOrderByTradeDateDesc(
+                                                stock.getId(), reportDate);
+                                if (reportClosePrice.isPresent()) {
+                                    return reportClosePrice.get().getClosePrice() * 0.8;
+                                }
                             }
                             return 0.0;
                         })
@@ -252,16 +269,18 @@ public class StockService {
             return List.of();
         }
 
-        // 리포트별 발행일 종가를 미리 조회하여 캐싱 (SELL 리포트용)
+        // 리포트별 발행일 종가를 미리 조회하여 캐싱 (HOLD, SELL 리포트용)
         Map<Long, Integer> closePriceByReportId = new HashMap<>();
         for (Report report : validReports) {
-            if (report.getHiddenOpinion() != null &&
-                "SELL".equals(HiddenOpinionLabel.toSimpleCategory(report.getHiddenOpinion()))) {
-                LocalDate reportDate = report.getReportDate().toLocalDate();
-                // 해당 리포트 발행일의 종가 조회
-                closePriceRepository
-                        .findFirstByStockIdAndTradeDateLessThanEqualOrderByTradeDateDesc(stockId, reportDate)
-                        .ifPresent(closePrice -> closePriceByReportId.put(report.getId(), closePrice.getClosePrice()));
+            if (report.getHiddenOpinion() != null) {
+                String category = HiddenOpinionLabel.toSimpleCategory(report.getHiddenOpinion());
+                if ("HOLD".equals(category) || "SELL".equals(category)) {
+                    LocalDate reportDate = report.getReportDate().toLocalDate();
+                    // 해당 리포트 발행일의 종가 조회
+                    closePriceRepository
+                            .findFirstByStockIdAndTradeDateLessThanEqualOrderByTradeDateDesc(stockId, reportDate)
+                            .ifPresent(closePrice -> closePriceByReportId.put(report.getId(), closePrice.getClosePrice()));
+                }
             }
         }
 
@@ -286,14 +305,19 @@ public class StockService {
                                 (r1, r2) -> r1.getReportDate().isAfter(r2.getReportDate()) ? r1 : r2
                         ));
 
-                // AIM's 평균 목표가 계산 (BUY/HOLD: 실제 목표가, SELL: 발행일 종가 × 0.8)
+                // AIM's 평균 목표가 계산 (BUY: 실제 목표가, HOLD: 발행일 종가, SELL: 발행일 종가 × 0.8)
                 Double averageTargetPrice = latestReportByAnalyst.values().stream()
                         .filter(report -> report.getHiddenOpinion() != null)
                         .mapToDouble(report -> {
                             String category = HiddenOpinionLabel.toSimpleCategory(report.getHiddenOpinion());
-                            // BUY, HOLD는 실제 목표가 사용
-                            if ("BUY".equals(category) || "HOLD".equals(category)) {
+                            // BUY는 실제 목표가 사용
+                            if ("BUY".equals(category)) {
                                 return report.getTargetPrice() != null ? report.getTargetPrice() : 0.0;
+                            }
+                            // HOLD는 발행일 종가 사용 (변화 없음을 의미)
+                            else if ("HOLD".equals(category)) {
+                                Integer closePrice = closePriceByReportId.get(report.getId());
+                                return closePrice != null ? closePrice : 0.0;
                             }
                             // SELL은 발행일 종가 × 0.8
                             else if ("SELL".equals(category)) {
@@ -362,17 +386,24 @@ public class StockService {
                 .average()
                 .orElse(0.0);
 
-        // 3. AIM's 평균 목표가 계산 (BUY/HOLD: 실제 목표가, SELL: 발행일 종가 × 0.8)
+        // 3. AIM's 평균 목표가 계산 (BUY: 실제 목표가, HOLD: 발행일 종가, SELL: 발행일 종가 × 0.8)
         List<Double> aimsTargetPrices = new ArrayList<>();
         for (Report report : latestReportByAnalyst.values()) {
             if (report.getHiddenOpinion() != null) {
                 String category = HiddenOpinionLabel.toSimpleCategory(report.getHiddenOpinion());
 
-                // BUY, HOLD는 실제 목표가 사용
-                if ("BUY".equals(category) || "HOLD".equals(category)) {
+                // BUY는 실제 목표가 사용
+                if ("BUY".equals(category)) {
                     if (report.getTargetPrice() != null) {
                         aimsTargetPrices.add(report.getTargetPrice().doubleValue());
                     }
+                }
+                // HOLD는 발행일 종가 사용 (변화 없음을 의미)
+                else if ("HOLD".equals(category)) {
+                    LocalDate reportDate = report.getReportDate().toLocalDate();
+                    closePriceRepository
+                            .findFirstByStockIdAndTradeDateLessThanEqualOrderByTradeDateDesc(stockId, reportDate)
+                            .ifPresent(closePrice -> aimsTargetPrices.add(closePrice.getClosePrice().doubleValue()));
                 }
                 // SELL은 발행일 종가 × 0.8
                 else if ("SELL".equals(category)) {
@@ -386,12 +417,24 @@ public class StockService {
 
         // AIM's 평균 목표가 (정수로 반올림)
         Integer aimsTargetPrice = null;
+        Integer aimsMinTargetPrice = null;
+        Integer aimsMaxTargetPrice = null;
         if (!aimsTargetPrices.isEmpty()) {
             double aimsAverage = aimsTargetPrices.stream()
                     .mapToDouble(Double::doubleValue)
                     .average()
                     .orElse(0.0);
             aimsTargetPrice = (int) Math.round(aimsAverage);
+
+            // AIM's 최소/최대 목표가
+            aimsMinTargetPrice = (int) Math.round(aimsTargetPrices.stream()
+                    .mapToDouble(Double::doubleValue)
+                    .min()
+                    .orElse(0.0));
+            aimsMaxTargetPrice = (int) Math.round(aimsTargetPrices.stream()
+                    .mapToDouble(Double::doubleValue)
+                    .max()
+                    .orElse(0.0));
         }
 
         return TargetPriceStatsDTO.builder()
@@ -399,6 +442,8 @@ public class StockService {
                 .averageTargetPrice(averageTargetPrice)
                 .minTargetPrice(minTargetPrice)
                 .aimsTargetPrice(aimsTargetPrice)
+                .aimsMinTargetPrice(aimsMinTargetPrice)
+                .aimsMaxTargetPrice(aimsMaxTargetPrice)
                 .build();
     }
 

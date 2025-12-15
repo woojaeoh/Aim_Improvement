@@ -178,13 +178,22 @@ public class ReportService {
         List<ClosePrice> closePrices = closePriceRepository.findByStockIdOrderByTradeDateDesc(stockId);
         Integer currentClosePrice = !closePrices.isEmpty() ? closePrices.get(0).getClosePrice() : null;
 
-        // 9. AIM's 평균 목표가 계산 (BUY/HOLD: 실제 목표가, SELL: 발행일 종가 × 0.8)
+        // 9. AIM's 평균 목표가 계산 (BUY: 실제 목표가, HOLD: 발행일 종가, SELL: 발행일 종가 × 0.8)
         Double aimsAverageTargetPrice = validReports.stream()
                 .mapToDouble(report -> {
                     String category = HiddenOpinionLabel.toSimpleCategory(report.getHiddenOpinion());
-                    // BUY, HOLD는 실제 목표가 사용
-                    if ("BUY".equals(category) || "HOLD".equals(category)) {
+                    // BUY는 실제 목표가 사용
+                    if ("BUY".equals(category)) {
                         return report.getTargetPrice() != null ? report.getTargetPrice() : 0.0;
+                    }
+                    // HOLD는 발행일 종가 사용 (변화 없음을 의미)
+                    else if ("HOLD".equals(category)) {
+                        LocalDate reportDate = report.getReportDate().toLocalDate();
+                        Optional<ClosePrice> reportClosePrice = closePriceRepository
+                                .findFirstByStockIdAndTradeDateLessThanEqualOrderByTradeDateDesc(stockId, reportDate);
+                        if (reportClosePrice.isPresent()) {
+                            return reportClosePrice.get().getClosePrice().doubleValue();
+                        }
                     }
                     // SELL은 발행일 종가 × 0.8
                     else if ("SELL".equals(category)) {
