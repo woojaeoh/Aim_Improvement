@@ -240,6 +240,10 @@ public class AnalystMetricsService {
         metrics.setAvgReturnDiff(avgReturnDiff != null ? roundToTwoDecimals(avgReturnDiff) : null);
         metrics.setAvgTargetDiff(avgTargetDiff != null ? roundToTwoDecimals(avgTargetDiff) : null);
         metrics.setReportCount(allEvaluations.size()); // 평가 가능한 리포트 개수 저장
+
+        // ✅ 동시성 테스트용: 업데이트 카운터 증가
+        metrics.incrementUpdateCount();
+
         metrics.setAnalyst(analystRepository.findById(analystId).orElseThrow());
 
         metricsRepository.save(metrics);
@@ -393,6 +397,10 @@ public class AnalystMetricsService {
         metrics.setAvgReturnDiff(avgReturnDiff != null ? roundToTwoDecimals(avgReturnDiff) : null);
         metrics.setAvgTargetDiff(avgTargetDiff != null ? roundToTwoDecimals(avgTargetDiff) : null);
         metrics.setReportCount(allEvaluations.size()); // 평가 가능한 리포트 개수 저장
+
+        // ✅ 동시성 테스트용: 업데이트 카운터 증가
+        metrics.incrementUpdateCount();
+
         metrics.setAnalyst(analystRepository.findById(analystId).orElseThrow());
 
         metricsRepository.save(metrics);

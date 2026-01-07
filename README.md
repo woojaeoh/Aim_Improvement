@@ -138,6 +138,92 @@ spring:
 5. **API 문서 확인**
 - Swagger UI: http://localhost:8080/swagger-ui/index.html
 
+## 🔥 기술적 도전과제
+
+### 1. 동시성 제어 문제 발견 및 분석
+
+#### P (Problem): 동시 요청 시 데이터 유실 발생
+
+**문제 발견:**
+
+애널리스트 메트릭 계산 시 여러 스레드가 동시에 실행되면 마지막 스레드의 결과만 반영되는 **Lost Update** 현상 발생
+
+**재현 테스트:**
+```java
+@Test
+void testLostUpdateWithoutLock() throws InterruptedException {
+    // 100개 스레드가 동시에 같은 애널리스트의 메트릭 업데이트
+    ExecutorService executor = Executors.newFixedThreadPool(100);
+
+    for (int i = 0; i < 100; i++) {
+        executor.submit(() -> {
+            analystMetricsService.calculateAndSaveAccuracyRate(analystId);
+        });
+    }
+
+    // 결과: 100번 업데이트 예상 → 실제 67번만 반영 (33% Lost Update!)
+}
+```
+
+**측정 결과:**
+- 예상 업데이트 횟수: 100회
+- 실제 반영 횟수: 67회
+- **Lost Update 발생: 33건 (33.0%)**
+
+**원인 분석:**
+```java
+@Transactional
+public void calculateAndSaveAccuracyRate(Long analystId) {
+    // 1. 조회 (T1 시점)
+    AnalystMetrics metrics = repository.findById(analystId);
+
+    // 2. 복잡한 계산 (시간 소요, T2 시점)
+    // 👉 이 시점에 다른 스레드도 동일 데이터 조회 가능!
+    double accuracyRate = complexCalculation();
+
+    // 3. 저장 (T3 시점)
+    // 👉 나중에 저장하는 스레드가 이전 값 덮어씀 (Lost Update)
+    metrics.setAccuracyRate(accuracyRate);
+    repository.save(metrics);
+}
+```
+
+**Check-Then-Act 패턴의 Race Condition:**
+```
+시간 T1: 스레드 A - 메트릭 조회 (accuracyRate = 75.0)
+시간 T2: 스레드 B - 메트릭 조회 (accuracyRate = 75.0) ← 동일한 값 읽음
+시간 T3: 스레드 A - 계산 후 저장 (accuracyRate = 75.5)
+시간 T4: 스레드 B - 계산 후 저장 (accuracyRate = 76.2)
+결과: 스레드 A의 75.5가 스레드 B의 76.2로 덮어써짐 → 데이터 손실
+```
+
+**금융 데이터 영향:**
+- 애널리스트 신뢰도 점수 부정확
+- 잘못된 애널리스트 추천
+- 투자자 의사결정에 영향
+
+**왜 @Transactional이 해결하지 못하나?**
+
+`@Transactional`은 ACID를 보장하지만, 여러 트랜잭션의 "동시 실행"을 막지는 못합니다:
+- 기본 격리 수준(READ_COMMITTED)에서는 Lost Update 발생 가능
+- 애플리케이션 레벨의 동시성 제어 필요
+
+#### A (Action)
+> Week 2에서 Redis 분산락 적용 예정
+
+#### R (Result)
+> 적용 후 작성 예정
+
+---
+
+### 테스트 환경
+- **Java 21**
+- **Spring Boot 3.5.6**
+- **JUnit 5**
+- **동시성 테스트**: ExecutorService + CountDownLatch
+
+---
+
 ## 팀원
 
 | 이름 | 역할 | 담당 업무 |
