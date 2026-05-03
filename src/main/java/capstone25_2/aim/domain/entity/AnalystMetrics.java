@@ -15,6 +15,9 @@ public class AnalystMetrics {
     @Id @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    @Version
+    private Long version;
+
     private Double accuracyRate; //정확도
     private Double returnRate; //수익률
     private Double targetDiffRate; //목표가 오차율

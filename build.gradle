@@ -30,8 +30,10 @@ dependencies {
 	compileOnly 'org.projectlombok:lombok'
 	runtimeOnly 'com.mysql:mysql-connector-j'
 	annotationProcessor 'org.projectlombok:lombok'
+	testCompileOnly 'org.projectlombok:lombok'
+	testAnnotationProcessor 'org.projectlombok:lombok'
 
-	implementation 'com.fasterxml.jackson.datatype:jackson-datatype-hibernate5-jakarta'
+	implementation 'com.fasterxml.jackson.datatype:jackson-datatype-hibernate6'
 
 	implementation 'org.springframework.boot:spring-boot-starter-validation'
 
@@ -43,6 +45,13 @@ dependencies {
 
 	// OpenCSV (CSV 파일 파싱용)
 	implementation 'com.opencsv:opencsv:5.9'
+
+	// Spring Retry (낙관적 락 재시도용)
+	implementation 'org.springframework.boot:spring-boot-starter-aop'
+	implementation 'org.springframework.retry:spring-retry'
+
+	// Redis (공유 캐시)
+	implementation 'org.springframework.boot:spring-boot-starter-data-redis'
 
 	testImplementation 'org.springframework.boot:spring-boot-starter-test'
 	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'

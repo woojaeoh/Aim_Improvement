@@ -8,6 +8,11 @@ import capstone25_2.aim.repository.AnalystRepository;
 import capstone25_2.aim.repository.ClosePriceRepository;
 import capstone25_2.aim.repository.ReportRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
+import org.springframework.retry.annotation.Backoff;
+import org.springframework.retry.annotation.Retryable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -25,9 +30,10 @@ public class AnalystMetricsService {
     private final ClosePriceRepository closePriceRepository;
 
     // 랭킹 리스트 조회 (기본: aimsScore 순)
+    @Cacheable(value = "analystRanking", key = "#sortBy")
     @Transactional(readOnly = true)
     public AnalystRankingResponseDTO getRankedAnalysts(String sortBy) {
-        List<AnalystMetrics> metricsList = metricsRepository.findAll();
+List<AnalystMetrics> metricsList = metricsRepository.findAll();
         return createRankedResponse(metricsList,sortBy);
     }
 
@@ -102,6 +108,11 @@ public class AnalystMetricsService {
      * 모든 리포트 기준으로 계산
      * 의견변화 시점 기준으로 평가 (의견변화 시점 이후 1년 내 모든 리포트 평가)
      */
+    @Retryable(
+            retryFor = ObjectOptimisticLockingFailureException.class,
+            maxAttempts = 100,
+            backoff = @Backoff(delay = 10)
+    )
     @Transactional
     public void calculateAndSaveAccuracyRate(Long analystId) {
         // 1. 모든 리포트 조회
@@ -715,6 +726,7 @@ public class AnalystMetricsService {
      *
      * @return 계산된 애널리스트 수
      */
+    @CacheEvict(value = "analystRanking", allEntries = true)
     @Transactional
     public int calculateAllAnalystMetricsWithCache() {
         System.out.println("📊 모든 애널리스트 지표 일괄 계산 시작 (최적화 버전)...");
