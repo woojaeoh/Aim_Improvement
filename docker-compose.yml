@@ -8,41 +8,51 @@ services:
     depends_on:
       - app1
       - app2
+    networks:
+      - aim-network
 
   app1:
     build: .
     environment:
-      DB_HOST: mysql
-      REDIS_HOST: redis
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/aim
+      SPRING_DATASOURCE_USERNAME: root
+      SPRING_DATASOURCE_PASSWORD: 1234
+      SPRING_DATA_REDIS_HOST: redis
     depends_on:
       mysql:
         condition: service_healthy
       redis:
         condition: service_started
+    networks:
+      - aim-network
 
   app2:
     build: .
     environment:
-      DB_HOST: mysql
-      REDIS_HOST: redis
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/aim
+      SPRING_DATASOURCE_USERNAME: root
+      SPRING_DATASOURCE_PASSWORD: 1234
+      SPRING_DATA_REDIS_HOST: redis
     depends_on:
       mysql:
         condition: service_healthy
       redis:
         condition: service_started
+    networks:
+      - aim-network
 
   redis:
     image: redis:7-alpine
     ports:
       - "6379:6379"
+    networks:
+      - aim-network
 
   mysql:
     image: mysql:8.0
     environment:
       MYSQL_DATABASE: aim
       MYSQL_ROOT_PASSWORD: 1234
-    ports:
-      - "3306:3306"
     volumes:
       - mysql_data:/var/lib/mysql
     healthcheck:
@@ -50,6 +60,12 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    networks:
+      - aim-network
+
+networks:
+  aim-network:
+    driver: bridge
 
 volumes:
   mysql_data:
