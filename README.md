@@ -49,16 +49,21 @@ AIM은 증권 애널리스트들이 발행하는 리포트를 체계적으로 �
 - **Pytorch** - 파이썬 학습 모델
 - **FinBERT** - 금융사전 학습 모델 및 분류기 모델
 
-
 ### Backend
 - **Java 21** - 최신 LTS 버전
 - **Spring Boot 3.5.6** - 프레임워크
 - **Spring Data JPA** - ORM 및 데이터 접근
 - **Hibernate** - JPA 구현체
+- **Spring Retry** - 낙관적 락 재시도 처리
 
-### Database
+### Database & Cache
 - **MySQL 8** - 관계형 데이터베이스
+- **Redis 7** - 공유 캐시 및 분산락
 - **P6Spy** - SQL 쿼리 모니터링
+
+### Infra
+- **Docker Compose** - 다중 인스턴스 컨테이너 오케스트레이션
+- **Nginx** - 로드밸런서 (Round-Robin)
 
 ### API & Documentation
 - **RESTful API** - 표준 REST API 설계
@@ -79,74 +84,118 @@ AIM은 증권 애널리스트들이 발행하는 리포트를 체계적으로 �
 │  (React.js)     │
 └────────┬────────┘
          │ REST API
-┌────────▼────────────────────────┐
-│     Spring Boot Backend         │
-│  ┌──────────────────────────┐  │
-│  │   Controller Layer       │  │
-│  ├──────────────────────────┤  │
-│  │   Service Layer          │  │
-│  │  - AIMS Score 계산       │  │
-│  │  - Hidden Opinion 분석   │  │
-│  ├──────────────────────────┤  │
-│  │   Repository Layer       │  │
-│  │   (Spring Data JPA)      │  │
-│  └──────────────────────────┘  │
-└────────┬────────────────────────┘
-         │ JDBC
 ┌────────▼────────┐
-│   MySQL DB      │
-│  - Analyst      │
-│  - Report       │
-│  - Stock        │
-│  - ClosePrice   │
-└─────────────────┘
+│     Nginx       │  ← 로드밸런서 (Round-Robin)
+│   (port 80)     │
+└────┬──────┬─────┘
+     │      │
+┌────▼──┐ ┌─▼─────┐
+│ App1  │ │ App2  │  ← Spring Boot 다중 인스턴스
+└────┬──┘ └──┬────┘
+     │       │
+     └───┬───┘
+         │
+┌────────▼────────┐     ┌─────────────┐
+│    MySQL 8      │     │   Redis 7   │
+│  (영구 데이터)   │     │  (캐시/락)   │
+└─────────────────┘     └─────────────┘
 ```
 
 ## 설치 및 실행
 
-### 사전 요구사항
+### 방법 1: Docker Compose (권장)
+
+```bash
+# 전체 환경 실행 (nginx + app x2 + redis + mysql)
+docker-compose up --build
+```
+
+- API: http://localhost/swagger-ui/index.html
+- 로드밸런서(nginx)가 app1/app2에 자동 분산
+
+### 방법 2: 로컬 실행
+
+**사전 요구사항**
 - Java 21 이상
 - MySQL 8.0 이상
-- Gradle 7.0 이상
+- Redis 7.0 이상
 
-### 실행 방법
-
-1. **데이터베이스 설정**
 ```sql
 CREATE DATABASE aim CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 ```
 
-2. **설정 파일 생성**
-```bash
-cp src/main/resources/application.yml.template src/main/resources/application.yml
-```
-
-3. **데이터베이스 연결 정보 수정** (`application.yml`)
-```yaml
-spring:
-  datasource:
-    url: jdbc:mysql://localhost:3306/aim
-    username: your_username
-    password: your_password
-```
-
-4. **애플리케이션 실행**
 ```bash
 ./gradlew bootRun
 ```
 
-5. **API 문서 확인**
-- Swagger UI: http://localhost:8080/swagger-ui/index.html
+- API: http://localhost:8080/swagger-ui/index.html
 
 ## 🔥 기술적 도전과제
 
-### 1. 동시성 제어 문제 발견 및 분석
+### 1. N+1 문제 → 벌크 조회 최적화
+
+#### P (Problem)
+애널리스트 랭킹 조회 시 애널리스트 수만큼 쿼리가 추가 발생하는 N+1 문제.
+200명 애널리스트 조회 시 201개 쿼리 실행.
+
+#### A (Action)
+섹터별 평균 메트릭을 사전에 HashMap으로 일괄 계산하여 in-memory에 올려두고,
+각 애널리스트 계산 시 DB 조회 없이 HashMap lookup으로 대체.
+
+```java
+// 섹터 평균 1회 bulk 조회
+Map<String, SectorAverageMetrics> sectorAverages = calculateSectorAverageMetrics();
+
+// 이후 각 애널리스트 계산에서 DB 조회 없이 Map lookup
+SectorAverageMetrics avg = sectorAverages.get(eval.sector);
+```
+
+#### R (Result)
+- 쿼리 수: 201개 → 1개 (섹터 평균 사전 계산)
+- 단일 인스턴스 환경에서 유효한 해결책
+
+**트레이드오프**: 인스턴스가 여러 개로 늘어나면 각 인스턴스가 독립적인 HashMap을 가지게 되어 데이터 불일치 가능성 → Redis 공유 캐시로 해결
+
+---
+
+### 2. 단일 인스턴스 한계 → Redis 공유 캐시 도입
+
+#### P (Problem)
+스케일아웃(다중 인스턴스) 환경에서 각 인스턴스의 로컬 메모리가 독립적으로 존재.
+app1과 app2가 서로 다른 캐시 상태를 가져 데이터 불일치 발생 가능.
+
+#### A (Action)
+Redis를 인스턴스 간 공유 캐시(Single Source of Truth)로 도입.
+`@Cacheable` / `@CacheEvict`로 캐시 읽기/무효화를 선언적으로 처리.
+
+```java
+@Cacheable(value = "analystRanking", key = "#sortBy")
+public AnalystRankingResponseDTO getRankedAnalysts(String sortBy) { ... }
+
+@CacheEvict(value = "analystRanking", allEntries = true)
+public int calculateAllAnalystMetricsWithCache() { ... }
+```
+
+#### R (Result)
+JMeter 부하 테스트 (100 threads, ramp-up 10s, loop 5회):
+
+| 지표 | 캐시 적용 전 | 캐시 적용 후 |
+|------|------------|------------|
+| 평균 응답시간 | 195ms | 4ms |
+| 최소 응답시간 | 28ms | 1ms |
+| 최대 응답시간 | 3,681ms | 15ms |
+| Error % | 0% | 0% |
+| Throughput | 31.5/sec | 34.4/sec |
+
+**응답시간 약 98% 감소**
+
+---
+
+### 3. 동시성 제어 문제 → 낙관적 락 적용
 
 #### P (Problem): 동시 요청 시 데이터 유실 발생
 
-**문제 발견:**
-
-애널리스트 메트릭 계산 시 여러 스레드가 동시에 실행되면 마지막 스레드의 결과만 반영되는 **Lost Update** 현상 발생
+애널리스트 메트릭 계산 시 여러 스레드가 동시에 실행되면 마지막 스레드의 결과만 반영되는 **Lost Update** 현상 발생.
 
 **재현 테스트:**
 ```java
@@ -154,13 +203,11 @@ spring:
 void testLostUpdateWithoutLock() throws InterruptedException {
     // 100개 스레드가 동시에 같은 애널리스트의 메트릭 업데이트
     ExecutorService executor = Executors.newFixedThreadPool(100);
-
     for (int i = 0; i < 100; i++) {
         executor.submit(() -> {
             analystMetricsService.calculateAndSaveAccuracyRate(analystId);
         });
     }
-
     // 결과: 100번 업데이트 예상 → 실제 67번만 반영 (33% Lost Update!)
 }
 ```
@@ -170,49 +217,78 @@ void testLostUpdateWithoutLock() throws InterruptedException {
 - 실제 반영 횟수: 67회
 - **Lost Update 발생: 33건 (33.0%)**
 
-**원인 분석:**
-```java
-@Transactional
-public void calculateAndSaveAccuracyRate(Long analystId) {
-    // 1. 조회 (T1 시점)
-    AnalystMetrics metrics = repository.findById(analystId);
-
-    // 2. 복잡한 계산 (시간 소요, T2 시점)
-    // 👉 이 시점에 다른 스레드도 동일 데이터 조회 가능!
-    double accuracyRate = complexCalculation();
-
-    // 3. 저장 (T3 시점)
-    // 👉 나중에 저장하는 스레드가 이전 값 덮어씀 (Lost Update)
-    metrics.setAccuracyRate(accuracyRate);
-    repository.save(metrics);
-}
-```
-
-**Check-Then-Act 패턴의 Race Condition:**
-```
-시간 T1: 스레드 A - 메트릭 조회 (accuracyRate = 75.0)
-시간 T2: 스레드 B - 메트릭 조회 (accuracyRate = 75.0) ← 동일한 값 읽음
-시간 T3: 스레드 A - 계산 후 저장 (accuracyRate = 75.5)
-시간 T4: 스레드 B - 계산 후 저장 (accuracyRate = 76.2)
-결과: 스레드 A의 75.5가 스레드 B의 76.2로 덮어써짐 → 데이터 손실
-```
-
-**금융 데이터 영향:**
-- 애널리스트 신뢰도 점수 부정확
-- 잘못된 애널리스트 추천
-- 투자자 의사결정에 영향
-
-**왜 @Transactional이 해결하지 못하나?**
-
-`@Transactional`은 ACID를 보장하지만, 여러 트랜잭션의 "동시 실행"을 막지는 못합니다:
-- 기본 격리 수준(READ_COMMITTED)에서는 Lost Update 발생 가능
-- 애플리케이션 레벨의 동시성 제어 필요
-
 #### A (Action)
-> Week 2에서 Redis 분산락 적용 예정
+엔티티에 `@Version` 필드를 추가해 낙관적 락 적용.
+충돌 감지 시 `@Retryable`로 최대 100회 재시도 (10ms backoff).
+
+```java
+@Version
+private Long version;
+
+@Retryable(
+    retryFor = ObjectOptimisticLockingFailureException.class,
+    maxAttempts = 100,
+    backoff = @Backoff(delay = 10)
+)
+public void calculateAndSaveAccuracyRate(Long analystId) { ... }
+```
 
 #### R (Result)
-> 적용 후 작성 예정
+- Lost Update 0건 (100% 데이터 정합성 보장)
+- 행(Row) 레벨 잠금으로 다른 애널리스트 계산에 영향 없음
+
+---
+
+### 4. 스케일아웃 환경 → Redis 분산락으로 배치 중복 실행 방지
+
+#### P (Problem)
+다중 인스턴스 환경에서 `POST /admin/metrics/calculate` 동시 호출 시
+app1과 app2가 동시에 전체 메트릭 재계산을 실행하여 DB 부하 및 데이터 불일치 발생.
+
+낙관적 락은 **행(Row) 레벨** 충돌을 처리하지만,
+배치 작업의 **중복 실행 자체**를 막지는 못함.
+
+#### A (Action)
+Redis `SET NX EX`로 분산락 구현. Lua 스크립트로 원자적 해제 보장.
+
+```java
+// 락 획득: SET lock:key uniqueValue NX EX 600
+public boolean tryAcquire(String lockKey, String lockValue, Duration ttl) {
+    return Boolean.TRUE.equals(
+        redisTemplate.opsForValue().setIfAbsent(lockKey, lockValue, ttl)
+    );
+}
+
+// 락 해제: 내 락인지 확인 후 삭제 (Lua 스크립트, 원자적)
+private static final DefaultRedisScript<Long> RELEASE_SCRIPT = new DefaultRedisScript<>(
+    "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end",
+    Long.class
+);
+```
+
+UUID로 인스턴스별 고유 락 값 생성 → 다른 인스턴스의 락을 실수로 해제하는 상황 방지.
+
+#### R (Result)
+JMeter 동시성 테스트 (10 threads, ramp-up 0s):
+
+| 응답 | 건수 | 의미 |
+|------|------|------|
+| 200 OK | 1건 | 락 획득 성공, 계산 실행 |
+| 409 Conflict | 9건 | 락 획득 실패, 즉시 차단 |
+
+**Docker Compose 스케일아웃 환경 전체 부하 테스트** (100 threads, ramp-up 10s, loop 5회):
+
+| 지표 | 수치 |
+|------|------|
+| 평균 응답시간 | 5ms |
+| Error % | 0% |
+| Throughput | 50.4/sec |
+| p90 응답시간 | 9ms |
+| p95 응답시간 | 11ms |
+| app1 처리 요청 | 2,502건 |
+| app2 처리 요청 | 2,496건 |
+
+nginx Round-Robin으로 app1/app2 약 50:50 분산 확인.
 
 ---
 
@@ -220,6 +296,7 @@ public void calculateAndSaveAccuracyRate(Long analystId) {
 - **Java 21**
 - **Spring Boot 3.5.6**
 - **JUnit 5**
+- **JMeter 5.x** - 부하 테스트
 - **동시성 테스트**: ExecutorService + CountDownLatch
 
 ---
@@ -236,7 +313,7 @@ public void calculateAndSaveAccuracyRate(Long analystId) {
 
 - **프로젝트 기간**: 2025년 9월 ~ 2025년 12월
 - **프로젝트 유형**: Capstone Design Project (Aim)
-- **개발 환경**: React.js, Pytorch, Spring Boot 3.x, Java 21, MySQL 8
+- **개발 환경**: React.js, Pytorch, Spring Boot 3.x, Java 21, MySQL 8, Redis 7
 
 ---
 
