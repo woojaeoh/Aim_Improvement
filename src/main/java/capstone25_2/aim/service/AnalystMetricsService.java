@@ -20,6 +20,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
+import java.util.Objects;
 
 @Service
 @RequiredArgsConstructor
@@ -130,6 +131,9 @@ List<AnalystMetrics> metricsList = metricsRepository.findAll();
 
         // 3. 해당 애널리스트 종목 ClosePrice Bulk 조회 → TreeMap 기반 캐시 구성
         Map<Long, TreeMap<LocalDate, Integer>> closePriceCache = buildClosePriceCache(reportsByStock.keySet());
+        int cachedPriceCount = closePriceCache.values().stream().mapToInt(TreeMap::size).sum();
+        System.out.printf("[ClosePrice] 애널리스트 %d | 종목 %d개 | 종가 %d건 로드 | Before: 최대 %d회 쿼리 → After: 1회 Bulk%n",
+                analystId, reportsByStock.keySet().size(), cachedPriceCount, recentReports.size() * 3);
 
         // 4. 모든 평가 결과를 리스트로 수집
         List<EvaluationResult> allEvaluations = new ArrayList<>();
@@ -294,6 +298,9 @@ List<AnalystMetrics> metricsList = metricsRepository.findAll();
 
         // 3. 해당 애널리스트 종목 ClosePrice Bulk 조회 → TreeMap 기반 캐시 구성
         Map<Long, TreeMap<LocalDate, Integer>> closePriceCache = buildClosePriceCache(reportsByStock.keySet());
+        int cachedPriceCount = closePriceCache.values().stream().mapToInt(TreeMap::size).sum();
+        System.out.printf("[ClosePrice] 애널리스트 %d | 종목 %d개 | 종가 %d건 로드 | Before: 최대 %d회 쿼리 → After: 1회 Bulk%n",
+                analystId, reportsByStock.keySet().size(), cachedPriceCount, recentReports.size() * 3);
 
         // 4. 모든 평가 결과를 리스트로 수집
         List<EvaluationResult> allEvaluations = new ArrayList<>();
@@ -586,8 +593,10 @@ List<AnalystMetrics> metricsList = metricsRepository.findAll();
      * 종목 ID 목록의 ClosePrice를 Bulk 조회 → Map<stockId, TreeMap<tradeDate, closePrice>> 반환
      */
     private Map<Long, TreeMap<LocalDate, Integer>> buildClosePriceCache(Collection<Long> stockIds) {
+        List<Long> validIds = stockIds.stream().filter(Objects::nonNull).collect(Collectors.toList());
+        if (validIds.isEmpty()) return new HashMap<>();
         List<ClosePrice> prices = closePriceRepository
-                .findByStockIdInOrderByStockIdAscTradeDateDesc(new ArrayList<>(stockIds));
+                .findByStockIdInOrderByStockIdAscTradeDateDesc(validIds);
         Map<Long, TreeMap<LocalDate, Integer>> cache = new HashMap<>();
         for (ClosePrice cp : prices) {
             cache.computeIfAbsent(cp.getStock().getId(), k -> new TreeMap<>())
@@ -991,8 +1000,11 @@ List<AnalystMetrics> metricsList = metricsRepository.findAll();
                 .collect(Collectors.groupingBy(r -> r.getAnalyst().getId() + "_" + r.getStock().getId()));
 
         // 전체 리포트 종목 ClosePrice Bulk 조회 → TreeMap 기반 캐시 구성
-        Map<Long, TreeMap<LocalDate, Integer>> closePriceCache = buildClosePriceCache(
-                allReports.stream().map(r -> r.getStock().getId()).collect(Collectors.toSet()));
+        Set<Long> bulkStockIds = allReports.stream().map(r -> r.getStock().getId()).collect(Collectors.toSet());
+        Map<Long, TreeMap<LocalDate, Integer>> closePriceCache = buildClosePriceCache(bulkStockIds);
+        int cachedPriceCount = closePriceCache.values().stream().mapToInt(TreeMap::size).sum();
+        System.out.printf("[ClosePrice] 전체 종목 %d개 | 종가 %d건 로드 | Before: 최대 %d회 쿼리 → After: 1회 Bulk%n",
+                bulkStockIds.size(), cachedPriceCount, allReports.size() * 3);
 
         // 모든 평가 결과를 리스트로 수집
         List<EvaluationResult> allEvaluations = new ArrayList<>();
@@ -1097,8 +1109,11 @@ List<AnalystMetrics> metricsList = metricsRepository.findAll();
                 .collect(Collectors.groupingBy(r -> r.getAnalyst().getId() + "_" + r.getStock().getId()));
 
         // 전체 리포트 종목 ClosePrice Bulk 조회 → TreeMap 기반 캐시 구성
-        Map<Long, TreeMap<LocalDate, Integer>> closePriceCache = buildClosePriceCache(
-                allReports.stream().map(r -> r.getStock().getId()).collect(Collectors.toSet()));
+        Set<Long> bulkStockIds = allReports.stream().map(r -> r.getStock().getId()).collect(Collectors.toSet());
+        Map<Long, TreeMap<LocalDate, Integer>> closePriceCache = buildClosePriceCache(bulkStockIds);
+        int cachedPriceCount = closePriceCache.values().stream().mapToInt(TreeMap::size).sum();
+        System.out.printf("[ClosePrice] 전체 종목 %d개 | 종가 %d건 로드 | Before: 최대 %d회 쿼리 → After: 1회 Bulk%n",
+                bulkStockIds.size(), cachedPriceCount, allReports.size() * 3);
 
         // 모든 평가 결과를 리스트로 수집
         List<EvaluationResult> allEvaluations = new ArrayList<>();
