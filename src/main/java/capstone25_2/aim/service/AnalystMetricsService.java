@@ -570,7 +570,7 @@ List<AnalystMetrics> metricsList = metricsRepository.findAll();
     }
 
     /**
-     * 리포트 이후 ~ 목표일 이전에 같은 종목에 대한 의견 변화가 있었는지 확인
+     * 리포트 이후 ~ 목표일(1년이 파라미터로 들어옴) 이전에 같은 종목에 대한 의견 변화가 있었는지 확인
      * hiddenOpinion의 3단계 분류(BUY/HOLD/SELL)가 변경된 경우에만 의견 변화로 판단
      */
     private Optional<Report> findOpinionChangeBeforeTarget(Report originalReport, LocalDateTime targetDate) {
@@ -728,7 +728,7 @@ List<AnalystMetrics> metricsList = metricsRepository.findAll();
      */
     @CacheEvict(value = "analystRanking", allEntries = true)
     @Transactional
-    public int calculateAllAnalystMetricsWithCache() {
+    public int calculateAllAnalystMetricsWithCache() { // 진입점.
         System.out.println("📊 모든 애널리스트 지표 일괄 계산 시작 (최적화 버전)...");
 
         // 0. 모든 기존 메트릭 삭제 (잘못된 데이터 제거)
@@ -739,7 +739,7 @@ List<AnalystMetrics> metricsList = metricsRepository.findAll();
 
         // 1. 섹터별 평균 수익률과 목표가 오차율 계산
         System.out.println("📈 섹터별 평균 계산 중...");
-        Map<String, SectorAverageMetrics> sectorAverages = calculateSectorAverageMetrics();
+        Map<String, SectorAverageMetrics> sectorAverages = calculateSectorAverageMetrics(); //모든 리포트 집계 후 -> 섹터별 수익률 , 목표가오차율의 평균을 정함.
 
         System.out.println("  ✓ 계산된 섹터 수: " + sectorAverages.size());
         for (Map.Entry<String, SectorAverageMetrics> entry : sectorAverages.entrySet()) {
