@@ -16,6 +16,7 @@ import org.springframework.retry.annotation.Retryable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -127,7 +128,10 @@ List<AnalystMetrics> metricsList = metricsRepository.findAll();
         Map<Long, List<Report>> reportsByStock = recentReports.stream()
                 .collect(Collectors.groupingBy(r -> r.getStock().getId()));
 
-        // 3. 모든 평가 결과를 리스트로 수집
+        // 3. 해당 애널리스트 종목 ClosePrice Bulk 조회 → TreeMap 기반 캐시 구성
+        Map<Long, TreeMap<LocalDate, Integer>> closePriceCache = buildClosePriceCache(reportsByStock.keySet());
+
+        // 4. 모든 평가 결과를 리스트로 수집
         List<EvaluationResult> allEvaluations = new ArrayList<>();
 
         for (Map.Entry<Long, List<Report>> entry : reportsByStock.entrySet()) {
@@ -140,15 +144,16 @@ List<AnalystMetrics> metricsList = metricsRepository.findAll();
             for (int i = 0; i < stockReports.size(); i++) {
                 Report currentReport = stockReports.get(i);
 
-                // 리포트 발행 시점의 종가 조회
-                Optional<ClosePrice> reportDatePriceOpt = getActualPriceAtDate(
-                        currentReport.getStock().getId(), currentReport.getReportDate());
+                // 리포트 발행 시점의 종가 조회 (캐시)
+                Optional<Integer> reportDatePriceOpt = getActualPriceFromCache(
+                        closePriceCache, currentReport.getStock().getId(),
+                        currentReport.getReportDate().toLocalDate());
 
                 if (reportDatePriceOpt.isEmpty()) {
                     continue; // 발행 시점 종가 없으면 평가 불가
                 }
 
-                Integer reportDatePrice = reportDatePriceOpt.get().getClosePrice();
+                Integer reportDatePrice = reportDatePriceOpt.get();
                 LocalDateTime oneYearLater = currentReport.getReportDate().plusYears(1);
 
                 // 1년 이내에 의견 변화가 있는지 확인
@@ -156,23 +161,25 @@ List<AnalystMetrics> metricsList = metricsRepository.findAll();
 
                 Integer comparePrice;
                 if (opinionChange.isPresent()) {
-                    // 의견 변화가 있으면 → 의견 변화 시점의 종가와 비교
-                    Optional<ClosePrice> changePriceOpt = getActualPriceAtDate(
-                            currentReport.getStock().getId(), opinionChange.get().getReportDate());
+                    // 의견 변화가 있으면 → 의견 변화 시점의 종가와 비교 (캐시)
+                    Optional<Integer> changePriceOpt = getActualPriceFromCache(
+                            closePriceCache, currentReport.getStock().getId(),
+                            opinionChange.get().getReportDate().toLocalDate());
 
                     if (changePriceOpt.isEmpty()) {
                         continue; // 의견 변화 시점 종가 없으면 평가 불가
                     }
-                    comparePrice = changePriceOpt.get().getClosePrice();
+                    comparePrice = changePriceOpt.get();
                 } else {
-                    // 의견 변화가 없으면 → 1년 후 종가와 비교
-                    Optional<ClosePrice> oneYearPriceOpt = getActualPriceAtDate(
-                            currentReport.getStock().getId(), oneYearLater);
+                    // 의견 변화가 없으면 → 1년 후 종가와 비교 (캐시)
+                    Optional<Integer> oneYearPriceOpt = getActualPriceFromCache(
+                            closePriceCache, currentReport.getStock().getId(),
+                            oneYearLater.toLocalDate());
 
                     if (oneYearPriceOpt.isEmpty()) {
                         continue; // 1년 후 종가 없으면 평가 불가
                     }
-                    comparePrice = oneYearPriceOpt.get().getClosePrice();
+                    comparePrice = oneYearPriceOpt.get();
                 }
 
                 // 리포트 평가
@@ -285,7 +292,10 @@ List<AnalystMetrics> metricsList = metricsRepository.findAll();
         Map<Long, List<Report>> reportsByStock = recentReports.stream()
                 .collect(Collectors.groupingBy(r -> r.getStock().getId()));
 
-        // 3. 모든 평가 결과를 리스트로 수집
+        // 3. 해당 애널리스트 종목 ClosePrice Bulk 조회 → TreeMap 기반 캐시 구성
+        Map<Long, TreeMap<LocalDate, Integer>> closePriceCache = buildClosePriceCache(reportsByStock.keySet());
+
+        // 4. 모든 평가 결과를 리스트로 수집
         List<EvaluationResult> allEvaluations = new ArrayList<>();
 
         for (Map.Entry<Long, List<Report>> entry : reportsByStock.entrySet()) {
@@ -298,15 +308,16 @@ List<AnalystMetrics> metricsList = metricsRepository.findAll();
             for (int i = 0; i < stockReports.size(); i++) {
                 Report currentReport = stockReports.get(i);
 
-                // 리포트 발행 시점의 종가 조회
-                Optional<ClosePrice> reportDatePriceOpt = getActualPriceAtDate(
-                        currentReport.getStock().getId(), currentReport.getReportDate());
+                // 리포트 발행 시점의 종가 조회 (캐시)
+                Optional<Integer> reportDatePriceOpt = getActualPriceFromCache(
+                        closePriceCache, currentReport.getStock().getId(),
+                        currentReport.getReportDate().toLocalDate());
 
                 if (reportDatePriceOpt.isEmpty()) {
                     continue; // 발행 시점 종가 없으면 평가 불가
                 }
 
-                Integer reportDatePrice = reportDatePriceOpt.get().getClosePrice();
+                Integer reportDatePrice = reportDatePriceOpt.get();
                 LocalDateTime oneYearLater = currentReport.getReportDate().plusYears(1);
 
                 // 1년 이내에 의견 변화가 있는지 확인
@@ -314,23 +325,25 @@ List<AnalystMetrics> metricsList = metricsRepository.findAll();
 
                 Integer comparePrice;
                 if (opinionChange.isPresent()) {
-                    // 의견 변화가 있으면 → 의견 변화 시점의 종가와 비교
-                    Optional<ClosePrice> changePriceOpt = getActualPriceAtDate(
-                            currentReport.getStock().getId(), opinionChange.get().getReportDate());
+                    // 의견 변화가 있으면 → 의견 변화 시점의 종가와 비교 (캐시)
+                    Optional<Integer> changePriceOpt = getActualPriceFromCache(
+                            closePriceCache, currentReport.getStock().getId(),
+                            opinionChange.get().getReportDate().toLocalDate());
 
                     if (changePriceOpt.isEmpty()) {
                         continue; // 의견 변화 시점 종가 없으면 평가 불가
                     }
-                    comparePrice = changePriceOpt.get().getClosePrice();
+                    comparePrice = changePriceOpt.get();
                 } else {
-                    // 의견 변화가 없으면 → 1년 후 종가와 비교
-                    Optional<ClosePrice> oneYearPriceOpt = getActualPriceAtDate(
-                            currentReport.getStock().getId(), oneYearLater);
+                    // 의견 변화가 없으면 → 1년 후 종가와 비교 (캐시)
+                    Optional<Integer> oneYearPriceOpt = getActualPriceFromCache(
+                            closePriceCache, currentReport.getStock().getId(),
+                            oneYearLater.toLocalDate());
 
                     if (oneYearPriceOpt.isEmpty()) {
                         continue; // 1년 후 종가 없으면 평가 불가
                     }
-                    comparePrice = oneYearPriceOpt.get().getClosePrice();
+                    comparePrice = oneYearPriceOpt.get();
                 }
 
                 // 리포트 평가
@@ -567,6 +580,31 @@ List<AnalystMetrics> metricsList = metricsRepository.findAll();
     private Optional<ClosePrice> getActualPriceAtDate(Long stockId, LocalDateTime targetDateTime) {
         return closePriceRepository.findFirstByStockIdAndTradeDateGreaterThanEqualOrderByTradeDateAsc(
                 stockId, targetDateTime.toLocalDate());
+    }
+
+    /**
+     * 종목 ID 목록의 ClosePrice를 Bulk 조회 → Map<stockId, TreeMap<tradeDate, closePrice>> 반환
+     */
+    private Map<Long, TreeMap<LocalDate, Integer>> buildClosePriceCache(Collection<Long> stockIds) {
+        List<ClosePrice> prices = closePriceRepository
+                .findByStockIdInOrderByStockIdAscTradeDateDesc(new ArrayList<>(stockIds));
+        Map<Long, TreeMap<LocalDate, Integer>> cache = new HashMap<>();
+        for (ClosePrice cp : prices) {
+            cache.computeIfAbsent(cp.getStock().getId(), k -> new TreeMap<>())
+                 .put(cp.getTradeDate(), cp.getClosePrice());
+        }
+        return cache;
+    }
+
+    /**
+     * 캐시에서 targetDate 이상인 가장 가까운 거래일 종가 조회 (TreeMap.ceilingEntry 활용)
+     */
+    private Optional<Integer> getActualPriceFromCache(
+            Map<Long, TreeMap<LocalDate, Integer>> cache, Long stockId, LocalDate targetDate) {
+        TreeMap<LocalDate, Integer> dateMap = cache.get(stockId);
+        if (dateMap == null) return Optional.empty();
+        Map.Entry<LocalDate, Integer> entry = dateMap.ceilingEntry(targetDate);
+        return entry != null ? Optional.of(entry.getValue()) : Optional.empty();
     }
 
     /**
@@ -952,6 +990,10 @@ List<AnalystMetrics> metricsList = metricsRepository.findAll();
         Map<String, List<Report>> reportsByAnalystAndStock = allReports.stream()
                 .collect(Collectors.groupingBy(r -> r.getAnalyst().getId() + "_" + r.getStock().getId()));
 
+        // 전체 리포트 종목 ClosePrice Bulk 조회 → TreeMap 기반 캐시 구성
+        Map<Long, TreeMap<LocalDate, Integer>> closePriceCache = buildClosePriceCache(
+                allReports.stream().map(r -> r.getStock().getId()).collect(Collectors.toSet()));
+
         // 모든 평가 결과를 리스트로 수집
         List<EvaluationResult> allEvaluations = new ArrayList<>();
 
@@ -965,15 +1007,16 @@ List<AnalystMetrics> metricsList = metricsRepository.findAll();
             for (int i = 0; i < reports.size(); i++) {
                 Report currentReport = reports.get(i);
 
-                // 리포트 발행 시점의 종가 조회
-                Optional<ClosePrice> reportDatePriceOpt = getActualPriceAtDate(
-                        currentReport.getStock().getId(), currentReport.getReportDate());
+                // 리포트 발행 시점의 종가 조회 (캐시)
+                Optional<Integer> reportDatePriceOpt = getActualPriceFromCache(
+                        closePriceCache, currentReport.getStock().getId(),
+                        currentReport.getReportDate().toLocalDate());
 
                 if (reportDatePriceOpt.isEmpty()) {
                     continue; // 발행 시점 종가 없으면 평가 불가
                 }
 
-                Integer reportDatePrice = reportDatePriceOpt.get().getClosePrice();
+                Integer reportDatePrice = reportDatePriceOpt.get();
                 LocalDateTime oneYearLater = currentReport.getReportDate().plusYears(1);
 
                 // 1년 이내에 의견 변화가 있는지 확인
@@ -981,23 +1024,25 @@ List<AnalystMetrics> metricsList = metricsRepository.findAll();
 
                 Integer comparePrice;
                 if (opinionChange.isPresent()) {
-                    // 의견 변화가 있으면 → 의견 변화 시점의 종가와 비교
-                    Optional<ClosePrice> changePriceOpt = getActualPriceAtDate(
-                            currentReport.getStock().getId(), opinionChange.get().getReportDate());
+                    // 의견 변화가 있으면 → 의견 변화 시점의 종가와 비교 (캐시)
+                    Optional<Integer> changePriceOpt = getActualPriceFromCache(
+                            closePriceCache, currentReport.getStock().getId(),
+                            opinionChange.get().getReportDate().toLocalDate());
 
                     if (changePriceOpt.isEmpty()) {
                         continue; // 의견 변화 시점 종가 없으면 평가 불가
                     }
-                    comparePrice = changePriceOpt.get().getClosePrice();
+                    comparePrice = changePriceOpt.get();
                 } else {
-                    // 의견 변화가 없으면 → 1년 후 종가와 비교
-                    Optional<ClosePrice> oneYearPriceOpt = getActualPriceAtDate(
-                            currentReport.getStock().getId(), oneYearLater);
+                    // 의견 변화가 없으면 → 1년 후 종가와 비교 (캐시)
+                    Optional<Integer> oneYearPriceOpt = getActualPriceFromCache(
+                            closePriceCache, currentReport.getStock().getId(),
+                            oneYearLater.toLocalDate());
 
                     if (oneYearPriceOpt.isEmpty()) {
                         continue; // 1년 후 종가 없으면 평가 불가
                     }
-                    comparePrice = oneYearPriceOpt.get().getClosePrice();
+                    comparePrice = oneYearPriceOpt.get();
                 }
 
                 // 리포트 평가
@@ -1051,6 +1096,10 @@ List<AnalystMetrics> metricsList = metricsRepository.findAll();
         Map<String, List<Report>> reportsByAnalystAndStock = allReports.stream()
                 .collect(Collectors.groupingBy(r -> r.getAnalyst().getId() + "_" + r.getStock().getId()));
 
+        // 전체 리포트 종목 ClosePrice Bulk 조회 → TreeMap 기반 캐시 구성
+        Map<Long, TreeMap<LocalDate, Integer>> closePriceCache = buildClosePriceCache(
+                allReports.stream().map(r -> r.getStock().getId()).collect(Collectors.toSet()));
+
         // 모든 평가 결과를 리스트로 수집
         List<EvaluationResult> allEvaluations = new ArrayList<>();
 
@@ -1064,15 +1113,16 @@ List<AnalystMetrics> metricsList = metricsRepository.findAll();
             for (int i = 0; i < reports.size(); i++) {
                 Report currentReport = reports.get(i);
 
-                // 리포트 발행 시점의 종가 조회
-                Optional<ClosePrice> reportDatePriceOpt = getActualPriceAtDate(
-                        currentReport.getStock().getId(), currentReport.getReportDate());
+                // 리포트 발행 시점의 종가 조회 (캐시)
+                Optional<Integer> reportDatePriceOpt = getActualPriceFromCache(
+                        closePriceCache, currentReport.getStock().getId(),
+                        currentReport.getReportDate().toLocalDate());
 
                 if (reportDatePriceOpt.isEmpty()) {
                     continue; // 발행 시점 종가 없으면 평가 불가
                 }
 
-                Integer reportDatePrice = reportDatePriceOpt.get().getClosePrice();
+                Integer reportDatePrice = reportDatePriceOpt.get();
                 LocalDateTime oneYearLater = currentReport.getReportDate().plusYears(1);
 
                 // 1년 이내에 의견 변화가 있는지 확인
@@ -1080,23 +1130,25 @@ List<AnalystMetrics> metricsList = metricsRepository.findAll();
 
                 Integer comparePrice;
                 if (opinionChange.isPresent()) {
-                    // 의견 변화가 있으면 → 의견 변화 시점의 종가와 비교
-                    Optional<ClosePrice> changePriceOpt = getActualPriceAtDate(
-                            currentReport.getStock().getId(), opinionChange.get().getReportDate());
+                    // 의견 변화가 있으면 → 의견 변화 시점의 종가와 비교 (캐시)
+                    Optional<Integer> changePriceOpt = getActualPriceFromCache(
+                            closePriceCache, currentReport.getStock().getId(),
+                            opinionChange.get().getReportDate().toLocalDate());
 
                     if (changePriceOpt.isEmpty()) {
                         continue; // 의견 변화 시점 종가 없으면 평가 불가
                     }
-                    comparePrice = changePriceOpt.get().getClosePrice();
+                    comparePrice = changePriceOpt.get();
                 } else {
-                    // 의견 변화가 없으면 → 1년 후 종가와 비교
-                    Optional<ClosePrice> oneYearPriceOpt = getActualPriceAtDate(
-                            currentReport.getStock().getId(), oneYearLater);
+                    // 의견 변화가 없으면 → 1년 후 종가와 비교 (캐시)
+                    Optional<Integer> oneYearPriceOpt = getActualPriceFromCache(
+                            closePriceCache, currentReport.getStock().getId(),
+                            oneYearLater.toLocalDate());
 
                     if (oneYearPriceOpt.isEmpty()) {
                         continue; // 1년 후 종가 없으면 평가 불가
                     }
-                    comparePrice = oneYearPriceOpt.get().getClosePrice();
+                    comparePrice = oneYearPriceOpt.get();
                 }
 
                 // 리포트 평가
