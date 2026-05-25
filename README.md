@@ -292,6 +292,49 @@ nginx Round-Robin으로 app1/app2 약 50:50 분산 확인.
 
 ---
 
+### 5. ClosePrice 단건 조회 → Bulk 조회 + TreeMap 캐시
+
+#### P (Problem)
+애널리스트 메트릭 계산 시 리포트 1건당 ClosePrice를 최대 3회 단건 조회.
+- 리포트 발행 시점 종가 1회
+- 의견변화 시점 종가 또는 1년 후 종가 1회
+- 섹터 평균 계산 단계에서 동일 패턴 반복
+
+전체 리포트 8,436건 × 3회 = **최대 25,308회/단계**, 섹터 평균 + 애널리스트별 합산 시 **총 50,616회** 단건 쿼리 발생.
+
+#### A (Action)
+애널리스트별 담당 종목의 전체 ClosePrice를 1회 Bulk 조회 후 `TreeMap<LocalDate, Integer>` 캐시로 구성.
+날짜 기반 조회는 `TreeMap.floorKey()`로 O(log n) 탐색.
+
+```java
+// 애널리스트 담당 종목 전체를 1회 Bulk 조회
+Map<Long, TreeMap<LocalDate, Integer>> closePriceCache =
+    buildClosePriceCache(reportsByStock.keySet());
+
+// DB 조회 없이 TreeMap에서 가장 가까운 날짜 종가 탐색
+private Optional<Integer> getActualPriceFromCache(
+        Map<Long, TreeMap<LocalDate, Integer>> cache,
+        Long stockId, LocalDate targetDate) {
+    TreeMap<LocalDate, Integer> priceMap = cache.get(stockId);
+    LocalDate key = priceMap.floorKey(targetDate);
+    return key != null ? Optional.of(priceMap.get(key)) : Optional.empty();
+}
+```
+
+#### R (Result)
+
+| 구분 | Before | After |
+|------|--------|-------|
+| ClosePrice 쿼리 수 | 50,616회 (단건) | 214회 (Bulk) |
+| 쿼리 감소율 | - | **99.6% 감소** |
+| 전체 계산 시간 | 약 1,076초 (예측) | **1,020초 (실측)** |
+| 단건 쿼리 평균 응답 | 1.1ms (인덱스 적중) | - |
+
+> 단건 쿼리 자체가 인덱스로 빠른 환경이었기 때문에 절대 시간 절감(약 56초)보다 **쿼리 구조 개선**이 핵심.
+> 데이터 규모가 커질수록 효과가 선형 이상으로 증가하는 구조.
+
+---
+
 ### 테스트 환경
 - **Java 21**
 - **Spring Boot 3.5.6**
