@@ -16,7 +16,7 @@ public class AnalystMetrics {
     private Long id;
 
     @Version
-    private Long version;
+    private long version;
 
     private Double accuracyRate; //정확도
     private Double returnRate; //수익률

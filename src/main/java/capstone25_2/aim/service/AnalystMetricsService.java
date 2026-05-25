@@ -252,8 +252,7 @@ List<AnalystMetrics> metricsList = metricsRepository.findAll();
             targetDiffs.stream().mapToDouble(d -> d).average().orElse(0.0);
 
         // 5. AnalystMetrics 조회 또는 생성 후 저장 (소수점 두자리로 반올림)
-        AnalystMetrics metrics = analystRepository.findById(analystId)
-                .map(analyst -> analyst.getAnalystMetrics())
+        AnalystMetrics metrics = metricsRepository.findByAnalystId(analystId)
                 .orElseGet(AnalystMetrics::new);
 
         metrics.setAccuracyRate(roundToTwoDecimals(accuracyRate));
@@ -418,8 +417,7 @@ List<AnalystMetrics> metricsList = metricsRepository.findAll();
             targetDiffs.stream().mapToDouble(d -> d).average().orElse(0.0);
 
         // 6. AnalystMetrics 조회 또는 생성 후 저장 (소수점 두자리로 반올림)
-        AnalystMetrics metrics = analystRepository.findById(analystId)
-                .map(analyst -> analyst.getAnalystMetrics())
+        AnalystMetrics metrics = metricsRepository.findByAnalystId(analystId)
                 .orElseGet(AnalystMetrics::new);
 
         metrics.setAccuracyRate(roundToTwoDecimals(accuracyRate));
@@ -776,6 +774,8 @@ List<AnalystMetrics> metricsList = metricsRepository.findAll();
     @CacheEvict(value = "analystRanking", allEntries = true)
     @Transactional
     public int calculateAllAnalystMetricsWithCache() { // 진입점.
+        long startTime = System.currentTimeMillis();
+        System.out.println("[TIMER] calculateAllAnalystMetricsWithCache 시작: " + java.time.LocalDateTime.now());
         System.out.println("📊 모든 애널리스트 지표 일괄 계산 시작 (최적화 버전)...");
 
         // 0. 모든 기존 메트릭 삭제 (잘못된 데이터 제거)
@@ -822,6 +822,10 @@ List<AnalystMetrics> metricsList = metricsRepository.findAll();
         System.out.println("🎯 aim's score 일괄 계산 시작...");
         int scoreCalculatedCount = calculateAllAimsScores();
         System.out.println("✅ aim's score 계산 완료: " + scoreCalculatedCount + "명");
+
+        long endTime = System.currentTimeMillis();
+        System.out.println("[TIMER] calculateAllAnalystMetricsWithCache 종료: " + java.time.LocalDateTime.now());
+        System.out.printf("[TIMER] 총 소요 시간: %.2f초%n", (endTime - startTime) / 1000.0);
 
         return calculatedCount;
     }
