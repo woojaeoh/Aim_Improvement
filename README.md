@@ -335,6 +335,58 @@ private Optional<Integer> getActualPriceFromCache(
 
 ---
 
+### 6. 의견 변화 탐색 O(n²) → O(n) 최적화
+
+#### P (Problem)
+`findOpinionChangeBeforeTarget()`이 외부 루프의 매 리포트마다 `stockReports` 전체를 stream filter로 재스캔.
+리스트가 이미 날짜 오름차순으로 정렬되어 있음에도 i=0, 1, 2... 반복할 때마다 처음부터 O(n) 탐색 반복.
+
+- 종목당 리포트 n건 → 총 O(n²) 비교 연산
+- 전체 8,436건 처리 시 수천만 번 비교 발생
+
+```java
+// Before: 전체 리스트를 매번 처음부터 재스캔
+List<Report> laterReports = sortedStockReports.stream()
+    .filter(r -> r.getReportDate().isAfter(originalReport.getReportDate()))
+    .filter(r -> r.getReportDate().isBefore(targetDate))
+    .toList();
+```
+
+#### A (Action)
+현재 인덱스 `i`를 파라미터로 전달 → `i+1`부터 순회, 날짜 초과 시 `break`로 early exit.
+정렬 보장이 있으므로 각 인덱스는 전체 루프에서 최대 1회만 방문.
+
+```java
+// After: i+1부터 시작, 날짜 초과 즉시 break
+private Optional<Report> findOpinionChangeBeforeTarget(
+        Report originalReport, LocalDateTime targetDate,
+        List<Report> sortedStockReports, int fromIndex) {
+    String previousCategory = HiddenOpinionLabel.toSimpleCategory(originalReport.getHiddenOpinion());
+
+    for (int j = fromIndex + 1; j < sortedStockReports.size(); j++) {
+        Report next = sortedStockReports.get(j);
+        if (!next.getReportDate().isBefore(targetDate)) break; // 정렬 보장 → early exit
+        String currentCategory = HiddenOpinionLabel.toSimpleCategory(next.getHiddenOpinion());
+        if (!Objects.equals(previousCategory, currentCategory)) return Optional.of(next);
+        previousCategory = currentCategory;
+    }
+    return Optional.empty();
+}
+```
+
+#### R (Result)
+
+| 구분 | Before | After |
+|------|--------|-------|
+| 알고리즘 복잡도 | O(n²) | O(n) |
+| 전체 계산 시간 | **1,020초** | **44초** |
+| 시간 단축 | - | **95.7% 감소 (976초 단축)** |
+
+> Bulk 조회로 쿼리 수는 99.6% 줄었지만 시간은 5%밖에 안 줄었던 원인이 바로 이 O(n²).
+> 쿼리 횟수가 아닌 **CPU 연산 복잡도**가 실제 병목이었음.
+
+---
+
 ### 테스트 환경
 - **Java 21**
 - **Spring Boot 3.5.6**

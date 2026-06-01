@@ -161,7 +161,7 @@ List<AnalystMetrics> metricsList = metricsRepository.findAll();
                 LocalDateTime oneYearLater = currentReport.getReportDate().plusYears(1);
 
                 // 1년 이내에 의견 변화가 있는지 확인
-                Optional<Report> opinionChange = findOpinionChangeBeforeTarget(currentReport, oneYearLater);
+                Optional<Report> opinionChange = findOpinionChangeBeforeTarget(currentReport, oneYearLater, stockReports, i);
 
                 Integer comparePrice;
                 if (opinionChange.isPresent()) {
@@ -327,7 +327,7 @@ List<AnalystMetrics> metricsList = metricsRepository.findAll();
                 LocalDateTime oneYearLater = currentReport.getReportDate().plusYears(1);
 
                 // 1년 이내에 의견 변화가 있는지 확인
-                Optional<Report> opinionChange = findOpinionChangeBeforeTarget(currentReport, oneYearLater);
+                Optional<Report> opinionChange = findOpinionChangeBeforeTarget(currentReport, oneYearLater, stockReports, i);
 
                 Integer comparePrice;
                 if (opinionChange.isPresent()) {
@@ -489,105 +489,6 @@ List<AnalystMetrics> metricsList = metricsRepository.findAll();
     }
 
     /**
-     * 의견변화 시점 기준으로 리포트 평가 (하위 호환성 유지용)
-     * @param report 평가 대상 리포트 (의견변화가 발생한 리포트)
-     * @param baseDate 기준 의견변화 시점
-     * @param baseClosePrice 기준 의견변화 시점의 종가
-     * @return EvaluationResult (정확도, 수익률, 목표가 오차율 포함) 또는 null (평가 불가)
-     */
-    private EvaluationResult evaluateReportAfterOpinionChange(
-            Report report, LocalDateTime baseDate, Integer baseClosePrice) {
-
-        // 1. 리포트 발행 후 1년 뒤의 실제 주가 조회
-        LocalDateTime oneYearLater = report.getReportDate().plusYears(1);
-        Optional<ClosePrice> actualPriceOpt = getActualPriceAtDate(report.getStock().getId(), oneYearLater);
-
-        if (actualPriceOpt.isEmpty()) {
-            return null; // 1년 후 주가 데이터 없으면 평가 불가
-        }
-
-        Integer oneYearLaterPrice = actualPriceOpt.get().getClosePrice();
-        Integer targetPrice = report.getTargetPrice();
-
-        if (targetPrice == null || targetPrice == 0 || baseClosePrice == 0) {
-            return null; // 목표가나 기준 종가가 없으면 평가 불가
-        }
-
-        // 2. 예측 방향 판단 (목표가 vs 기준 종가)
-        boolean predictedUp = targetPrice > baseClosePrice;
-
-        // 3. 실제 방향 판단 (1년 후 주가 vs 기준 종가)
-        boolean actualUp = oneYearLaterPrice > baseClosePrice;
-
-        // 4. 정확도 판단: 예측 방향과 실제 방향이 일치하면 정답
-        boolean isCorrect = (predictedUp == actualUp);
-
-        // 5. 수익률 계산: (1년 후 주가 - 기준 종가) / 기준 종가 * 100
-        double returnRate = ((double) (oneYearLaterPrice - baseClosePrice) / baseClosePrice) * 100.0;
-
-        // 6. 목표가 오차율 계산: |목표가 - 기준 종가| / 기준 종가 * 100
-        double targetDiffRate = Math.abs((double) (targetPrice - baseClosePrice) / baseClosePrice) * 100.0;
-
-        // 7. 섹터 정보 추출
-        String sector = report.getStock().getSector();
-
-        return new EvaluationResult(isCorrect, returnRate, targetDiffRate, sector);
-    }
-
-    /**
-     * 개별 리포트 평가 (정확도 + 수익률 + 목표가 오차율)
-     * @return EvaluationResult (정확도, 수익률, 목표가 오차율 포함) 또는 null (평가 불가)
-     */
-    private EvaluationResult evaluateReportWithReturn(Report report) {
-        // 1. 중간에 의견 변화가 있는지 확인
-        LocalDateTime oneYearLater = report.getReportDate().plusYears(1);
-        Optional<Report> opinionChange = findOpinionChangeBeforeTarget(report, oneYearLater);
-
-        // 2. 리포트 발행 시점의 실제 주가 조회
-        Optional<ClosePrice> reportDatePriceOpt = getActualPriceAtDate(
-                report.getStock().getId(), report.getReportDate());
-
-        if (reportDatePriceOpt.isEmpty()) {
-            return null; // 리포트 발행 시점 주가 데이터 없으면 평가 불가
-        }
-
-        Integer reportDatePrice = reportDatePriceOpt.get().getClosePrice();
-
-        // 의견이 변경되었으면 의견 변화 시점의 종가와 비교
-        if (opinionChange.isPresent()) {
-            Report changedReport = opinionChange.get();
-            Optional<ClosePrice> changeDatePriceOpt = getActualPriceAtDate(
-                    report.getStock().getId(), changedReport.getReportDate());
-
-            if (changeDatePriceOpt.isEmpty()) {
-                return null; // 의견 변화 시점 주가 데이터 없으면 평가 불가
-            }
-
-            Integer changeDatePrice = changeDatePriceOpt.get().getClosePrice();
-            return evaluateReport(report, reportDatePrice, changeDatePrice);
-        }
-
-        // 3. 1년 후의 실제 주가 조회
-        Optional<ClosePrice> actualPriceOpt = getActualPriceAtDate(report.getStock().getId(), oneYearLater);
-
-        if (actualPriceOpt.isEmpty()) {
-            return null; // 1년 후 주가 데이터 없으면 평가 불가
-        }
-
-        Integer oneYearLaterPrice = actualPriceOpt.get().getClosePrice();
-
-        return evaluateReport(report, reportDatePrice, oneYearLaterPrice);
-    }
-
-    /**
-     * 특정 날짜 이후 가장 가까운 거래일의 실제 주가 조회
-     */
-    private Optional<ClosePrice> getActualPriceAtDate(Long stockId, LocalDateTime targetDateTime) {
-        return closePriceRepository.findFirstByStockIdAndTradeDateGreaterThanEqualOrderByTradeDateAsc(
-                stockId, targetDateTime.toLocalDate());
-    }
-
-    /**
      * 종목 ID 목록의 ClosePrice를 Bulk 조회 → Map<stockId, TreeMap<tradeDate, closePrice>> 반환
      */
     private Map<Long, TreeMap<LocalDate, Integer>> buildClosePriceCache(Collection<Long> stockIds) {
@@ -614,35 +515,17 @@ List<AnalystMetrics> metricsList = metricsRepository.findAll();
         return entry != null ? Optional.of(entry.getValue()) : Optional.empty();
     }
 
-    /**
-     * 리포트 이후 ~ 목표일(1년이 파라미터로 들어옴) 이전에 같은 종목에 대한 의견 변화가 있었는지 확인
-     * hiddenOpinion의 3단계 분류(BUY/HOLD/SELL)가 변경된 경우에만 의견 변화로 판단
-     */
-    private Optional<Report> findOpinionChangeBeforeTarget(Report originalReport, LocalDateTime targetDate) {
-        // 원본 리포트 이후의 모든 리포트를 시간순으로 조회
-        List<Report> laterReports = reportRepository.findByAnalystIdAndStockIdOrderByReportDateAsc(
-                originalReport.getAnalyst().getId(),
-                originalReport.getStock().getId()
-        ).stream()
-                .filter(r -> r.getReportDate().isAfter(originalReport.getReportDate()))
-                .filter(r -> r.getReportDate().isBefore(targetDate))
-                .toList();
+    private Optional<Report> findOpinionChangeBeforeTarget(
+            Report originalReport, LocalDateTime targetDate,
+            List<Report> sortedStockReports, int fromIndex) {
+        String previousCategory = HiddenOpinionLabel.toSimpleCategory(originalReport.getHiddenOpinion());
 
-        if (laterReports.isEmpty()) {
-            return Optional.empty();
-        }
-
-        // 원본 리포트의 의견 분류
-        String originalCategory = HiddenOpinionLabel.toSimpleCategory(originalReport.getHiddenOpinion());
-        String previousCategory = originalCategory;
-
-        // 시간순으로 순회하면서 의견 변화가 있는지 확인
-        for (Report laterReport : laterReports) {
-            String currentCategory = HiddenOpinionLabel.toSimpleCategory(laterReport.getHiddenOpinion());
-
-            // 이전 리포트와 의견이 다르면 의견 변화로 판단
+        for (int j = fromIndex + 1; j < sortedStockReports.size(); j++) {
+            Report next = sortedStockReports.get(j);
+            if (!next.getReportDate().isBefore(targetDate)) break; // 정렬 보장 → early exit
+            String currentCategory = HiddenOpinionLabel.toSimpleCategory(next.getHiddenOpinion());
             if (!java.util.Objects.equals(previousCategory, currentCategory)) {
-                return Optional.of(laterReport);
+                return Optional.of(next);
             }
             previousCategory = currentCategory;
         }
@@ -724,49 +607,6 @@ List<AnalystMetrics> metricsList = metricsRepository.findAll();
     }
 
     /**
-     * 특정 종목에 대한 모든 애널리스트들의 평균 수익률과 목표가 오차율 계산
-     *
-     * @param stockId 종목 ID
-     * @param fiveYearsAgo 5년 전 날짜
-     * @return 해당 종목에 대한 모든 애널리스트들의 평균 메트릭
-     */
-    private StockAverageMetrics calculateStockAverageMetrics(
-            Long stockId, LocalDateTime fiveYearsAgo) {
-
-        // 해당 종목에 대한 모든 애널리스트들의 최근 5년 리포트 조회
-        List<Report> allAnalystReports = reportRepository
-                .findByStockIdAndReportDateAfterOrderByReportDateDesc(stockId, fiveYearsAgo);
-
-        if (allAnalystReports.isEmpty()) {
-            return new StockAverageMetrics(null, null);
-        }
-
-        // 각 리포트 평가
-        double totalReturn = 0.0;
-        int returnCount = 0;
-        double totalTargetDiff = 0.0;
-        int targetDiffCount = 0;
-
-        for (Report report : allAnalystReports) {
-            EvaluationResult result = evaluateReportWithReturn(report);
-            if (result != null) {
-                totalReturn += result.returnRate;
-                returnCount++;
-
-                if (result.targetDiffRate != null) {
-                    totalTargetDiff += result.targetDiffRate;
-                    targetDiffCount++;
-                }
-            }
-        }
-
-        Double averageReturn = (returnCount > 0) ? totalReturn / returnCount : null;
-        Double averageTargetDiff = (targetDiffCount > 0) ? totalTargetDiff / targetDiffCount : null;
-
-        return new StockAverageMetrics(averageReturn, averageTargetDiff);
-    }
-
-    /**
      * 모든 애널리스트의 지표를 전체 평균과 비교하여 일괄 계산 (성능 최적화 버전)
      *
      * @return 계산된 애널리스트 수
@@ -774,58 +614,52 @@ List<AnalystMetrics> metricsList = metricsRepository.findAll();
     @CacheEvict(value = "analystRanking", allEntries = true)
     @Transactional
     public int calculateAllAnalystMetricsWithCache() { // 진입점.
-        long startTime = System.currentTimeMillis();
-        System.out.println("[TIMER] calculateAllAnalystMetricsWithCache 시작: " + java.time.LocalDateTime.now());
-        System.out.println("📊 모든 애널리스트 지표 일괄 계산 시작 (최적화 버전)...");
+        long t0 = System.currentTimeMillis();
+        System.out.println("[TIMER] 시작: " + java.time.LocalDateTime.now());
 
-        // 0. 모든 기존 메트릭 삭제 (잘못된 데이터 제거)
-        System.out.println("🗑️ 기존 메트릭 초기화 중...");
+        // 0. 삭제
         int deletedCount = metricsRepository.findAll().size();
         metricsRepository.deleteAll();
-        System.out.println("✅ 기존 메트릭 삭제 완료: " + deletedCount + "개");
+        long t1 = System.currentTimeMillis();
+        System.out.printf("[TIMER] 0.deleteAll: %.2f초%n", (t1 - t0) / 1000.0);
 
-        // 1. 섹터별 평균 수익률과 목표가 오차율 계산
-        System.out.println("📈 섹터별 평균 계산 중...");
-        Map<String, SectorAverageMetrics> sectorAverages = calculateSectorAverageMetrics(); //모든 리포트 집계 후 -> 섹터별 수익률 , 목표가오차율의 평균을 정함.
+        // 1. 섹터 평균
+        Map<String, SectorAverageMetrics> sectorAverages = calculateSectorAverageMetrics();
+        long t2 = System.currentTimeMillis();
+        System.out.printf("[TIMER] 1.sectorAvg: %.2f초%n", (t2 - t1) / 1000.0);
 
-        System.out.println("  ✓ 계산된 섹터 수: " + sectorAverages.size());
-        for (Map.Entry<String, SectorAverageMetrics> entry : sectorAverages.entrySet()) {
-            String sector = entry.getKey();
-            SectorAverageMetrics avg = entry.getValue();
-            System.out.println("    - " + sector + ": 수익률 " + String.format("%.2f", avg.averageReturn) + "%, " +
-                    "목표가 오차율 " + String.format("%.2f", avg.averageTargetDiff) + "%");
-        }
-
-        // 2. 모든 애널리스트 조회
+        // 2. 애널리스트 계산
         List<Analyst> allAnalysts = analystRepository.findAll();
         System.out.println("👥 전체 애널리스트 수: " + allAnalysts.size());
 
-        // 3. 각 애널리스트마다 섹터별 평균과 비교하여 지표 계산
         int calculatedCount = 0;
         for (Analyst analyst : allAnalysts) {
             try {
+                long ta = System.currentTimeMillis();
                 calculateAndSaveAccuracyRateWithCache(analyst.getId(), sectorAverages);
+                long tb = System.currentTimeMillis();
                 calculatedCount++;
-
-                // 10명마다 진행 상황 출력
+                if (tb - ta > 2000) {
+                    System.out.printf("[TIMER] 애널리스트 %d 느림: %.2f초%n", analyst.getId(), (tb - ta) / 1000.0);
+                }
                 if (calculatedCount % 10 == 0) {
-                    System.out.println("  ⏳ 애널리스트 계산: " + calculatedCount + "/" + allAnalysts.size());
+                    System.out.printf("  ⏳ %d/%d (루프 누적 %.1f초)%n",
+                            calculatedCount, allAnalysts.size(), (System.currentTimeMillis() - t2) / 1000.0);
                 }
             } catch (Exception e) {
-                System.err.println("⚠️ 애널리스트 " + analyst.getId() + " 지표 계산 실패: " + e.getMessage());
+                System.err.println("⚠️ 애널리스트 " + analyst.getId() + " 실패: " + e.getMessage());
             }
         }
+        long t3 = System.currentTimeMillis();
+        System.out.printf("[TIMER] 2.analysts: %.2f초%n", (t3 - t2) / 1000.0);
 
-        System.out.println("✅ 애널리스트 지표 계산 완료: " + calculatedCount + "명");
-
-        // 4. aim's score 일괄 계산
-        System.out.println("🎯 aim's score 일괄 계산 시작...");
+        // 3. aims score
         int scoreCalculatedCount = calculateAllAimsScores();
-        System.out.println("✅ aim's score 계산 완료: " + scoreCalculatedCount + "명");
-
-        long endTime = System.currentTimeMillis();
-        System.out.println("[TIMER] calculateAllAnalystMetricsWithCache 종료: " + java.time.LocalDateTime.now());
-        System.out.printf("[TIMER] 총 소요 시간: %.2f초%n", (endTime - startTime) / 1000.0);
+        long t4 = System.currentTimeMillis();
+        System.out.printf("[TIMER] 3.aimsScore: %.2f초%n", (t4 - t3) / 1000.0);
+        System.out.printf("[TIMER] 총 소요: %.2f초%n", (t4 - t0) / 1000.0);
+        long startTime = t0;
+        long endTime = t4;
 
         return calculatedCount;
     }
@@ -1036,7 +870,7 @@ List<AnalystMetrics> metricsList = metricsRepository.findAll();
                 LocalDateTime oneYearLater = currentReport.getReportDate().plusYears(1);
 
                 // 1년 이내에 의견 변화가 있는지 확인
-                Optional<Report> opinionChange = findOpinionChangeBeforeTarget(currentReport, oneYearLater);
+                Optional<Report> opinionChange = findOpinionChangeBeforeTarget(currentReport, oneYearLater, reports, i);
 
                 Integer comparePrice;
                 if (opinionChange.isPresent()) {
@@ -1145,7 +979,7 @@ List<AnalystMetrics> metricsList = metricsRepository.findAll();
                 LocalDateTime oneYearLater = currentReport.getReportDate().plusYears(1);
 
                 // 1년 이내에 의견 변화가 있는지 확인
-                Optional<Report> opinionChange = findOpinionChangeBeforeTarget(currentReport, oneYearLater);
+                Optional<Report> opinionChange = findOpinionChangeBeforeTarget(currentReport, oneYearLater, reports, i);
 
                 Integer comparePrice;
                 if (opinionChange.isPresent()) {
@@ -1220,19 +1054,6 @@ List<AnalystMetrics> metricsList = metricsRepository.findAll();
     private double roundToTwoDecimals(double value) {
         // 소수점 첫째자리까지 반올림
         return Math.round(value * 10.0) / 10.0;
-    }
-
-    /**
-     * 종목별 평균 메트릭을 담는 내부 클래스
-     */
-    private static class StockAverageMetrics {
-        Double averageReturn;      // 해당 종목 모든 애널리스트들의 평균 수익률
-        Double averageTargetDiff;  // 해당 종목 모든 애널리스트들의 평균 목표가 오차율
-
-        StockAverageMetrics(Double averageReturn, Double averageTargetDiff) {
-            this.averageReturn = averageReturn;
-            this.averageTargetDiff = averageTargetDiff;
-        }
     }
 
     /**
